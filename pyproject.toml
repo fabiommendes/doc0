@@ -1,0 +1,68 @@
+[project]
+name = "doc0"
+version = "0.1.0"
+description = "Zero-configuration documentation generator for Python."
+readme = "README.md"
+authors = [
+    { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
+]
+maintainers = [
+    { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
+]
+requires-python = ">=3.13"
+dependencies = [
+    "myst-parser>=5.1.0",
+    "rich>=15.0.0",
+    "sphinx>=9.1.0",
+    "sphinx-autobuild>=2025.8.25",
+    "sphinx-mdinclude>=0.6.2",
+    "typer>=0.27.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
+license = "MIT"
+
+[project.urls]
+Homepage = "http://github.com/fabiommendes/zero-doc"
+Repository = "http://github.com/fabiommendes/zero-doc"
+Documentation = "https://zero-doc.readthedocs.io/"
+
+[project.scripts]
+doc0 = "doc0.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "doc0"
+module-root = ""
+
+[tool.mypy]
+strict = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.15",
+]
+
+[tool.taskipy.tasks]
+docs = { cmd = "sphinx-build -b html docs/source docs/build -n", help = "Build HTML documentation" }
+docs-serve = { cmd = "sphinx-autobuild docs/source docs/build -n", help = "Serve HTML documentation with live reload" }
+test = "pytest tests"
+lint = "ruff check ."
+build = "uv build"
+release = """
+    uv run task lint \\
+        && uv run task test \\
+        && uv run task docs \\
+        && uv run task build \\
+        && git add . && git commit -m "Release $(uv version)" && git tag "v$(uv version --short)"
+"""
