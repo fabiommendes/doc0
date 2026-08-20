@@ -128,7 +128,7 @@ class Doc0:
         # Write the requirements.txt file for Read the Docs, if it doesn't exist.
         req_path = self.root / "docs" / "requirements.txt"
         if not req_path.exists():
-            req_path.write_text(f"doc-zero>={module_version('doc0')}")
+            req_path.write_text(f"doc-zero>={module_version('doc-zero')}")
 
     def build(self) -> None:
         """
@@ -230,6 +230,7 @@ class Index:
     tutorials: Path | None = None
     how_to_guides: Path | None = None
     explanations: Path | None = None
+    user_guides: Path | None = None
 
     # Reference is concepts + api documentation
     concepts: Path | None = None
@@ -261,6 +262,7 @@ class Index:
 
         tutorials = select("tutorial")
         how_to_guides = select("how-to-guide")
+        user_guides = select("user-guide")
         explanations = select("explanation")
         concepts = select("concept")
 
@@ -269,6 +271,7 @@ class Index:
             tutorials=tutorials,
             how_to_guides=how_to_guides,
             explanations=explanations,
+            user_guides=user_guides,
             concepts=concepts,
             api_modules=module_names,
         )
@@ -298,6 +301,8 @@ class Index:
             yield f"   {self.tutorials.stem}"
         if self.how_to_guides:
             yield f"   {self.how_to_guides.stem}"
+        if self.user_guides:
+            yield f"   {self.user_guides.stem}"
         if self.explanations:
             yield f"   {self.explanations.stem}"
         if self.concepts:
@@ -350,13 +355,14 @@ class Conf:
 
         # Read the year from the Copyright notice in the LICENSE file.
         if (licence_file := Path(root / "LICENSE")).exists():
-            copyright = find_copyright(licence_file.read_text())
+            copyright = None
             if year is None:
                 try:
+                    copyright = find_copyright(licence_file.read_text())
                     year = int(copyright["year"])
                 except ValueError:
                     pass
-            if author is None:
+            if author is None and copyright is not None:
                 author = copyright["author"]
 
         return Conf(

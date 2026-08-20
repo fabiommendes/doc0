@@ -126,7 +126,7 @@ class PyProject:
         return False
 
     def _is_toplevel_package_layout(self) -> bool:
-        package_dir = self.root / self.name
+        package_dir = self.root / normalize_package_name(self.name)
         return package_dir.is_dir() and (package_dir / "__init__.py").exists()
 
     def _find_uv_root_modules(self) -> Iterable[ModuleSpec]:
@@ -165,3 +165,16 @@ class PyProject:
 class Author(TypedDict):
     name: str
     email: NotRequired[str]
+
+
+def normalize_package_name(name: str) -> str:
+    """
+    Normalize a package name to a valid Python identifier.
+
+    Args:
+        name: The package name to normalize.
+
+    Returns:
+        The normalized package name.
+    """
+    return name.replace("-", "_").replace(".", "_")

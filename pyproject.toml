@@ -1,6 +1,6 @@
 [project]
 name = "doc-zero"
-version = "0.1.2"
+version = "0.2.0"
 description = "Zero-configuration documentation generator for Python."
 readme = "README.md"
 authors = [
@@ -73,6 +73,7 @@ release = """
         && uv run task docs \\
         && uv run task build \\
         && git add . && git commit -m "Release $(uv version)" && git tag "v$(uv version --short)"
+        && git push && git push --tags
 """
 
 [tool.doc-zero]

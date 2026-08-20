@@ -175,6 +175,7 @@ class Module:
         if inspect.isclass(obj):
             yield f".. autoclass:: {qualname}"
             yield "   :members:"
+            yield "   :member-order: bysource"
         elif inspect.isroutine(obj):
             yield f".. autofunction:: {qualname}"
         else:

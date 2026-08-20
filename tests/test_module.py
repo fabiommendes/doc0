@@ -107,7 +107,9 @@ def test_load_module_reuses_already_imported_module(tmp_path, monkeypatch):
     assert module.docstring == "cached"
 
 
-def test_load_module_raises_when_spec_from_file_location_returns_none(tmp_path, monkeypatch):
+def test_load_module_raises_when_spec_from_file_location_returns_none(
+    tmp_path, monkeypatch
+):
     """
     load_module() also has a defensive check for the case where
     importlib.util.spec_from_file_location() itself returns None. That
@@ -120,7 +122,9 @@ def test_load_module_raises_when_spec_from_file_location_returns_none(tmp_path, 
     module_file = make_module_file(tmp_path / "specless.py", docstring="x")
     spec = ModuleSpec(name="specless", path=module_file)
 
-    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        importlib.util, "spec_from_file_location", lambda *a, **kw: None
+    )
 
     with pytest.raises(ImportError, match="Cannot load module"):
         spec.load_module()
@@ -259,6 +263,7 @@ def test_module_render_lists_all_entries_explicitly_in_order(tmp_path):
         "",
         ".. autoclass:: widgets.Widget",
         "   :members:",
+        "   :member-order: bysource",
         "",
         ".. autofunction:: widgets.make_widget",
     ]

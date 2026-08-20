@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import textwrap
 
-from doc0.module import ModuleSpec
-
 from conftest import make_module_file
+
+from doc0.module import ModuleSpec
 
 CLASS_AND_FUNCS_BODY = """\
 class Foo:
@@ -72,9 +72,11 @@ def test_titled_sections_preserve_declaration_order_and_group_members(tmp_path):
         "",
         ".. autoclass:: mod.Foo",
         "   :members:",
+        "   :member-order: bysource",
         "",
         ".. autoclass:: mod.Bar",
         "   :members:",
+        "   :member-order: bysource",
         "",
         "Utility functions",
         "-----------------",
@@ -106,6 +108,7 @@ def test_entries_before_first_section_form_unlabeled_leading_group(tmp_path):
         "",
         ".. autoclass:: mod.Foo",
         "   :members:",
+        "   :member-order: bysource",
         "",
         "Utility functions",
         "-----------------",
@@ -145,6 +148,7 @@ def test_section_with_single_paragraph_body(tmp_path):
         "",
         ".. autoclass:: mod.Foo",
         "   :members:",
+        "   :member-order: bysource",
     ]
 
 
@@ -248,7 +252,9 @@ def test_trailing_same_line_comment_is_not_a_section_marker(tmp_path):
     assert not any(line and set(line) == {"-"} for line in lines)
 
 
-def test_stray_comment_immediately_before_a_colon_line_suppresses_that_section(tmp_path):
+def test_stray_comment_immediately_before_a_colon_line_suppresses_that_section(
+    tmp_path,
+):
     """
     Documented limitation: a section is only recognized when the *first*
     line of its contiguous comment block starts with ``#:``. If an

@@ -386,9 +386,11 @@ def test_init_raises_when_license_exists_but_has_no_recognizable_copyright(
     write(tmp_path / "LICENSE", "This software is provided as-is.\n")
     doc = Doc0.load(tmp_path)
     doc.doc_root.mkdir(parents=True)
+    doc.init()  # init without license
 
-    with pytest.raises(ValueError, match="Copyright notice not found"):
-        doc.init()
+    conf = (doc.doc_root / "conf.py").read_text()
+    print(conf)
+    assert "copyright = 'unknown author'" in conf
 
 
 def test_conf_includes_default_sphinx_extensions(tmp_path: Path):
