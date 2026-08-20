@@ -56,31 +56,21 @@ def test_load_defaults_root_to_cwd(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------------------
 # A minimal, loadable project fixture
-#
-# NOTE: ModuleSpec.load_module() currently passes the package *directory*
-# (rather than its __init__.py) to importlib, so it cannot load anything
-# package-shaped -- see tests/test_module.py::test_load_module_on_a_package_raises_importerror.
-# Doc0.write_rst_files() calls root.load_module() on every project root
-# module, so *any* project whose root is a package (the normal case --
-# including doc0's own toplevel-package layout) currently fails before it
-# gets anywhere near conf.py/index.rst generation. We characterize that
-# failure below, and use a single-file root module (which is not
-# package-shaped) to exercise the rest of the successful pipeline.
 # ---------------------------------------------------------------------------
 
 
 def make_loadable_project(tmp_path, **toml_kwargs):
     """
-    A project whose sole root module is a single .py file, so it can
-    actually be loaded despite the load_module() package bug.
+    A project whose sole root module is a single .py file.
 
-    This has to go through the "uv build system" layout heuristic with
-    module-name set to the literal filename "acme.py": every *other*
-    layout heuristic (src layout, toplevel package layout) can only ever
-    discover directories (packages) as root modules, which are exactly
-    what load_module() cannot load. The resulting root module's name is
-    therefore "acme.py" (including the suffix) rather than "acme" -- a
-    direct, visible consequence of the same bug.
+    Goes through the "uv build system" layout heuristic with module-name
+    set to the literal filename "acme.py" (so the root module's name ends
+    up including the ".py" suffix, which is why assertions below reference
+    "acme.py" rather than "acme"). A normal package layout would work
+    fine too now that load_module() supports packages -- this shape is
+    just kept simple and dependency-free for tests that only care about
+    the docs-generation pipeline, not module layout detection (which has
+    its own coverage in test_pyproject.py).
     """
     make_pyproject_toml(
         tmp_path,
@@ -103,9 +93,8 @@ def make_loadable_project(tmp_path, **toml_kwargs):
 
 def test_write_rst_files_for_a_package_shaped_root_module(tmp_path):
     """
-    Characterization test for the real-world impact of the load_module()
-    bug: a project laid out exactly like doc0 itself (toplevel package with
-    __init__.py) fails as soon as init()/build() tries to load it.
+    A project laid out like doc0 itself (toplevel package with
+    __init__.py, not a single-file module) documents and builds fine.
     """
     make_pyproject_toml(tmp_path, name="acme", build_backend=None)
     make_package(tmp_path / "acme", docstring="The acme package.", all_=["main"])
@@ -117,6 +106,38 @@ def test_write_rst_files_for_a_package_shaped_root_module(tmp_path):
     assert (
         "Welcome to the acme documentation!" in (doc.doc_root / "index.rst").read_text()
     )
+
+
+def test_write_rst_files_scans_submodules_and_warns_on_missing_or_empty_all(
+    tmp_path, caplog
+):
+    make_pyproject_toml(tmp_path, name="acme", build_backend=None)
+    pkg = make_package(tmp_path / "acme", docstring="The acme package.", all_=["main"])
+    make_module_file(pkg / "api.py", docstring="Public API.", all_=["thing"])
+    make_module_file(pkg / "legacy.py", docstring="No __all__ here.")
+    make_module_file(pkg / "empty.py", docstring="Exports nothing.", all_=[])
+    make_module_file(pkg / "helpers.py", docstring=None, body="def helper(): ...\n")
+    make_module_file((pkg / "_private.py"))
+
+    doc = Doc0.load(tmp_path)
+    with caplog.at_level("WARNING"):
+        doc.write_rst_files()
+
+    api_index = (doc.doc_root / "api" / "_index.rst").read_text()
+    # The docstring-less "helpers" module is skipped entirely; the private
+    # module is never even considered (skip_private=True); the other three
+    # submodules are all documented, with or without __all__.
+    assert "   acme.api" in api_index
+    assert "   acme.legacy" in api_index
+    assert "   acme.empty" in api_index
+    assert "acme.helpers" not in api_index
+    assert "acme._private" not in api_index
+
+    assert (doc.doc_root / "api" / "acme.api.rst").exists()
+
+    messages = [record.message for record in caplog.records]
+    assert any("acme.legacy" in m and "no __all__" in m for m in messages)
+    assert any("acme.empty" in m and "do not export" in m for m in messages)
 
 
 # ---------------------------------------------------------------------------
@@ -138,19 +159,6 @@ def test_init_creates_doc_root_static_dir_conf_and_index(tmp_path: Path):
     assert (doc.doc_root / "api" / "_index.rst").exists()
 
 
-def test_init_does_not_overwrite_existing_conf_or_index_by_default(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-    write(doc.doc_root / "conf.py", "# hand-written conf\n")
-    write(doc.doc_root / "index.rst", "Hand-written index\n")
-
-    doc.init()
-
-    assert (doc.doc_root / "conf.py").read_text() == "# hand-written conf\n"
-    assert (doc.doc_root / "index.rst").read_text() == "Hand-written index\n"
-
-
 def test_init_force_conf_and_force_index_overwrite_existing_files(tmp_path: Path):
     make_loadable_project(tmp_path, name="acme")
     doc = Doc0.load(tmp_path)
@@ -158,7 +166,7 @@ def test_init_force_conf_and_force_index_overwrite_existing_files(tmp_path: Path
     write(doc.doc_root / "conf.py", "# stale\n")
     write(doc.doc_root / "index.rst", "stale\n")
 
-    doc.init(force_conf=True, force_index=True)
+    doc.init()
 
     assert "project = 'acme'" in (doc.doc_root / "conf.py").read_text()
     assert "acme" in (doc.doc_root / "index.rst").read_text()

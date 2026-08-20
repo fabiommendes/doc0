@@ -3,17 +3,15 @@ Shared scenario builders for the doc0 test harness.
 
 These tests exercise doc0 exclusively through its public API:
 
-* Doc0:
-    The toplevel entry point (load, init, build,  serve, test, write_rst_files,
-    write_readme_md)
-* PyProject:
-    Project introspection (get, __getitem__, properties, find_root_modules)
-* Module / ModuleSpec:
-    Module loading/rendering
-* doc0.cli.*:
-    The Typer CLI application
+* ``doc0.Doc0``    -- the toplevel entry point (``load``, ``init``, ``build``,
+  ``serve``, ``test``, ``write_rst_files``, ``write_readme_md``)
+* ``doc0.PyProject`` -- project introspection (``get``, ``__getitem__``,
+  properties, ``find_root_modules``)
+* ``doc0.Module`` / ``doc0.module.ModuleSpec`` -- module loading/rendering
+* ``doc0.util.validate_theme`` -- the one standalone public helper
+* ``doc0.cli.app`` -- the Typer CLI application
 
-No private (_-prefixed) method is called directly. Instead, each fixture
+No private (``_``-prefixed) method is called directly. Instead, each fixture
 builds a small, realistic project on disk (a "scenario") and the tests drive
 it through the public entry points above, so that private helpers are only
 exercised indirectly -- the same way a real user of doc0 would exercise them.
@@ -25,16 +23,16 @@ import sys
 import textwrap
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 import pytest
+
 
 # ---------------------------------------------------------------------------
 # Project scaffolding helpers
 # ---------------------------------------------------------------------------
 
 
-_MISSING: Any = object()
+_MISSING = object()
 
 
 def write(path: Path, content: str) -> Path:
@@ -61,20 +59,13 @@ def make_pyproject_toml(
     Write a pyproject.toml file with configurable knobs so that we can drive
     every branch of PyProject.find_root_modules() and Conf.from_pyproject().
     """
-
-    lines = [
-        "[project]",
-        f'name = "{name}"',
-        f'version = "{version}"',
-        f'description = "{description}"',
-    ]
+    lines = ["[project]", f'name = "{name}"', f'version = "{version}"', f'description = "{description}"']
 
     if include_authors:
         if authors is None:
             authors = [{"name": "Ada Lovelace", "email": "ada@example.com"}]
         author_toml = ", ".join(
-            "{ " + ", ".join(f'{k} = "{v}"' for k, v in a.items()) + " }"
-            for a in authors
+            "{ " + ", ".join(f'{k} = "{v}"' for k, v in a.items()) + " }" for a in authors
         )
         lines.append(f"authors = [{author_toml}]")
 
@@ -107,16 +98,23 @@ def make_module_file(
     *,
     docstring: str | None = "A test module.",
     all_: list[str] | None = _MISSING,
+    all_source: str | None = None,
     body: str = "",
 ) -> Path:
     """
     Write a single-file Python module used as a doc0 scan target.
-    """
 
+    Pass `all_` for a plain ``__all__ = [...]`` list (order preserved, no
+    comments). Pass `all_source` instead for raw ``__all__`` source text
+    verbatim -- e.g. to include ``#:`` section comments, which `repr()`
+    can't produce.
+    """
     parts = []
     if docstring is not None:
         parts.append(f'"""{docstring}"""\n')
-    if all_ is not _MISSING:
+    if all_source is not None:
+        parts.append(all_source if all_source.endswith("\n") else all_source + "\n")
+    elif all_ is not _MISSING:
         parts.append(f"__all__ = {all_!r}\n")
     parts.append(body)
     return write(path, "\n".join(parts))
@@ -149,9 +147,7 @@ class Recorder:
         return 0
 
 
-def _install_fake_module(
-    monkeypatch: pytest.MonkeyPatch, dotted: str, **attrs: object
-) -> ModuleType:
+def _install_fake_module(monkeypatch: pytest.MonkeyPatch, dotted: str, **attrs: object) -> ModuleType:
     """
     Insert a fake module named *dotted* into sys.modules (creating parent
     packages as needed) so that ``from <dotted> import <attr>`` succeeds
@@ -181,7 +177,7 @@ def fake_sphinx(monkeypatch: pytest.MonkeyPatch) -> dict[str, Recorder]:
     Stub out the ``sphinx.cmd.build`` and ``sphinx_autobuild.__main__``
     entry points that Doc0.build()/Doc0.serve() import lazily, so tests can
     exercise the full public build()/serve() flow without the (heavy) real
-    Sphinx dependency running.
+    Sphinx dependency installed.
     """
     build_recorder = Recorder()
     serve_recorder = Recorder()

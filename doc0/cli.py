@@ -12,7 +12,13 @@ import typer
 from .base import Doc0
 from .util import validate_theme
 
-__all__ = ["test", "build", "serve", "main", "app"]
+__all__ = [
+    "main",
+    #: Standalone commands
+    "test",
+    "build",
+    "serve",
+]
 
 app = typer.Typer(
     name="doc0",
@@ -37,7 +43,7 @@ def build(
         typer.Option(
             ..., "--theme", help="Select the Sphinx theme", callback=validate_theme
         ),
-    ] = "alabaster",
+    ] = "default",
 ) -> None:
     """
     Build the documentation for the current project.

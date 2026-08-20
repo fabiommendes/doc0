@@ -1,7 +1,8 @@
 # Agent instructions for doc0
 
 This file orients coding agents (and humans) working in this repository.
-`CLAUDE.md` symlinks this file to keep same content.
+`CLAUDE.md` in this same directory is a symlink to this file, so both
+Claude Code and generic "AGENTS.md" tooling read the same content.
 
 ## What this project is
 
@@ -24,15 +25,15 @@ uv sync --all-groups   # installs runtime deps + the dev group (ruff, pytest, py
 
 All defined as taskipy tasks in `pyproject.toml`; run with `uv run task <name>`.
 
-| Task         | Command                                             | Purpose                        |
-| ------------ | --------------------------------------------------- | ------------------------------ |
-| `test`       | `pytest tests`                                      | Run the test suite             |
-| `coverage`   | `pytest tests --cov=doc0 --cov-report=term-missing` | Run tests with coverage report |
-| `lint`       | `ruff check .`                                      | Lint                           |
-| `docs`       | `sphinx-build -b html docs/source docs/build -n`    | Build doc0's own documentation |
-| `docs-serve` | `sphinx-autobuild docs/source docs/build -n`        | Live-reload doc server         |
-| `build`      | `uv build`                                          | Build distributable package    |
-| `release`    | lint + test + docs + build + tag                    | Full release flow              |
+| Task | Command | Purpose |
+|---|---|---|
+| `test` | `pytest tests` | Run the test suite |
+| `coverage` | `pytest tests --cov=doc0 --cov-report=term-missing` | Run tests with coverage report |
+| `lint` | `ruff check .` | Lint |
+| `docs` | `sphinx-build -b html docs/source docs/build -n` | Build doc0's own documentation |
+| `docs-serve` | `sphinx-autobuild docs/source docs/build -n` | Live-reload doc server |
+| `build` | `uv build` | Build distributable package |
+| `release` | lint + test + docs + build + tag | Full release flow |
 
 CI (`.github/workflows/ci.yml`) runs `lint` and `coverage` on every push
 and PR. A change is not done until both pass locally.
@@ -44,8 +45,16 @@ and PR. A change is not done until both pass locally.
 - `doc0/pyproject.py` -- `PyProject`: parses `pyproject.toml` and detects the
   project's layout (uv build-backend / src / toplevel package) to find root modules.
 - `doc0/module.py` -- `ModuleSpec` (locate + load a module from disk) and
-  `Module` (a loaded module's docstring/exports/rendering).
-- `doc0/util.py` -- small standalone helpers.
+  `Module` (a loaded module's docstring/exports/rendering). `Module.render()`
+  uses `doc0/exports.py` to decide between an ordered, sectioned listing and
+  a plain `automodule` fallback.
+- `doc0/exports.py` -- internal (not re-exported): statically parses a
+  module's `__all__` literal via `ast` + `tokenize` into ordered,
+  `#:`-delimited sections with optional multi-paragraph body text, when it
+  can be done reliably (see the module docstring for the exact rules and a
+  documented edge-case limitation). Falls back to `None` for anything
+  dynamic, computed, or that doesn't match the module's runtime `__all__`.
+- `doc0/util.py` -- small standalone helpers (`validate_theme`, `first_existing`).
 - `doc0/cli.py` -- the `doc0` console script, built with Typer (`app.command()`
   for `build`/`serve`/`test`).
 - `doc0/__init__.py` -- the package's public surface: `Doc0`, `Module`,

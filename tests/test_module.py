@@ -48,16 +48,9 @@ def test_modulespec_for_plain_file_is_not_a_package(tmp_path):
 
 def test_load_module_on_a_package_should_work(tmp_path):
     """
-    Regression/characterization test.
-
-    ModuleSpec.load_module() passes ``self.path`` (the package *directory*)
-    to ``importlib.util.spec_from_file_location`` instead of
-    ``self.source_path`` (the package's ``__init__.py``). Python's importlib
-    cannot build a spec from a bare directory, so loading *any*
-    package-shaped module currently raises ImportError. This affects real
-    projects broadly, since Doc0.write_rst_files() loads the project's root
-    module the same way -- see test_base.py for the corresponding
-    end-to-end characterization test.
+    load_module() uses source_path (the package's __init__.py) plus
+    submodule_search_locations to build the spec, so package-shaped
+    modules -- not just single files -- load correctly.
     """
     pkg_dir = make_package(
         tmp_path / "greetings",
@@ -112,6 +105,25 @@ def test_load_module_reuses_already_imported_module(tmp_path, monkeypatch):
 
     assert module.module is fake
     assert module.docstring == "cached"
+
+
+def test_load_module_raises_when_spec_from_file_location_returns_none(tmp_path, monkeypatch):
+    """
+    load_module() also has a defensive check for the case where
+    importlib.util.spec_from_file_location() itself returns None. That
+    doesn't happen for a real file under normal use, so we drive it via
+    the documented importlib collaborator to exercise that branch of the
+    public method.
+    """
+    import importlib.util
+
+    module_file = make_module_file(tmp_path / "specless.py", docstring="x")
+    spec = ModuleSpec(name="specless", path=module_file)
+
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **kw: None)
+
+    with pytest.raises(ImportError, match="Cannot load module"):
+        spec.load_module()
 
 
 def test_load_module_raises_when_spec_has_no_loader(tmp_path, monkeypatch):
@@ -212,10 +224,8 @@ def test_iter_submodules_recurses_into_dir_without_init_but_does_not_yield_it(tm
 # ---------------------------------------------------------------------------
 
 
-def test_module_render_produces_automodule_directive(tmp_path):
-    # A single-file module, since load_module() currently cannot load a
-    # package (see test_load_module_on_a_package_raises_importerror).
-    module_file = make_module_file(tmp_path / "widgets.py", all_=["Widget"])
+def test_module_render_falls_back_to_blanket_members_without_all(tmp_path):
+    module_file = make_module_file(tmp_path / "widgets.py", docstring="Widgets.")
     spec = ModuleSpec(name="widgets", path=module_file)
     module = spec.load_module()
 
@@ -227,4 +237,28 @@ def test_module_render_produces_automodule_directive(tmp_path):
         "",
         ".. automodule:: widgets",
         "   :members:",
+    ]
+
+
+def test_module_render_lists_all_entries_explicitly_in_order(tmp_path):
+    module_file = make_module_file(
+        tmp_path / "widgets.py",
+        all_=["Widget", "make_widget"],
+        body="class Widget:\n    pass\n\n\ndef make_widget():\n    return Widget()\n",
+    )
+    spec = ModuleSpec(name="widgets", path=module_file)
+    module = spec.load_module()
+
+    rendered = module.render()
+
+    assert rendered.splitlines() == [
+        "widgets",
+        "=======",
+        "",
+        ".. automodule:: widgets",
+        "",
+        ".. autoclass:: widgets.Widget",
+        "   :members:",
+        "",
+        ".. autofunction:: widgets.make_widget",
     ]

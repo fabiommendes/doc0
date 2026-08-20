@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Iterator
+
+from .exports import Section, parse_export_sections
 
 
 @dataclass(frozen=True)
@@ -124,14 +127,55 @@ class Module:
     def render(self) -> str:
         """
         Render the module documentation as reStructuredText.
+
+        If ``__all__`` can be statically parsed into ordered, ``#:``-delimited
+        sections (see ``doc0.exports``), members are listed explicitly, in
+        declaration order, grouped under their sections. Otherwise, falls
+        back to a single ``automodule`` block listing all members in
+        whatever order Sphinx's autodoc picks.
         """
         return "\n".join(self._iter_lines())
 
-    def _iter_lines(self):
-        yield f"{self.name}"
+    def _iter_lines(self) -> Iterator[str]:
+        yield self.name
         yield "=" * len(self.name)
         yield ""
+
+        sections = parse_export_sections(self.source_path, self.module)
+        if sections is None:
+            yield f".. automodule:: {self.name}"
+            yield "   :members:"
+            return
+
         yield f".. automodule:: {self.name}"
-        yield "   :members:"
-        # for export in self.exports or []:
-        #     yield f"   {export}"
+        yield ""
+
+        for section in sections:
+            yield from self._iter_section_lines(section)
+
+    def _iter_section_lines(self, section: Section) -> Iterator[str]:
+        if section.title:
+            yield section.title
+            yield "-" * len(section.title)
+            yield ""
+
+        for line in section.body:
+            yield line
+        if section.body:
+            yield ""
+
+        for name in section.names:
+            yield from self._iter_member_lines(name)
+            yield ""
+
+    def _iter_member_lines(self, name: str) -> Iterator[str]:
+        qualname = f"{self.name}.{name}"
+        obj = getattr(self.module, name, None)
+
+        if inspect.isclass(obj):
+            yield f".. autoclass:: {qualname}"
+            yield "   :members:"
+        elif inspect.isroutine(obj):
+            yield f".. autofunction:: {qualname}"
+        else:
+            yield f".. autodata:: {qualname}"

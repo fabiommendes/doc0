@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass, field
 from logging import getLogger
 from pathlib import Path
@@ -21,6 +22,12 @@ DEFAULT_EXTENSIONS = [
     "sphinx_mdinclude",
     # "myst_parser",
 ]
+SPHINX_THEME_ALIASES = {
+    "rtd": "sphinx_rtd_theme",
+    "readthedocs": "sphinx_rtd_theme",
+    "default": "alabaster",
+}
+
 log = getLogger(__name__)
 
 
@@ -66,7 +73,7 @@ class Doc0:
         """
         return self.pyproject.root
 
-    def init(self, force_conf: bool = False, force_index: bool = False) -> None:
+    def init(self) -> None:
         """
         Assure that the documentation is initialized.
 
@@ -75,15 +82,13 @@ class Doc0:
         self.doc_root.mkdir(parents=True, exist_ok=True)
         (self.doc_root / "_static").mkdir(exist_ok=True)
 
-        # Write docs/conf.py, if it does not exist,
+        # Write/overwrite docs/conf.py.
         conf_path = self.doc_root / "conf.py"
-        if not conf_path.exists() or force_conf:
-            conf = Conf.from_pyproject(self.pyproject)
-            conf_path.write_text(conf.render())
+        conf = Conf.from_pyproject(self.pyproject, theme=self.theme)
+        conf_path.write_text(conf.render())
 
-        # Write docs/index.rst, if it does not exist
-        if not (self.doc_root / "index.rst").exists() or force_index:
-            self.write_rst_files()
+        # Write docs/index.rst and docs/api/*
+        self.write_rst_files()
         self.write_readme_md()
 
     def build(self) -> None:
@@ -92,7 +97,7 @@ class Doc0:
         """
         from sphinx.cmd.build import main
 
-        self.init(force_index=True, force_conf=True)
+        self.init()
         main([str(self.doc_root), str(self.root / "dist" / "docs")])
 
     def serve(self) -> None:
@@ -101,7 +106,7 @@ class Doc0:
         """
         from sphinx_autobuild.__main__ import main
 
-        self.init(force_index=True, force_conf=True)
+        self.init()
         main([str(self.doc_root), str(self.root / "dist" / "docs")])
 
     def test(self) -> None:
@@ -140,10 +145,15 @@ class Doc0:
         index_path = self.doc_root / "index.rst"
         index_path.write_text(index.render())
 
+        # Clean the docs/api directory
+        api_dir = self.doc_root / "api"
+        if api_dir.exists():
+            shutil.rmtree(api_dir)
+        api_dir.mkdir(parents=True, exist_ok=True)
+
         # Create the API documentation for each public module and the index.rst file.
         for module in public_modules:
             module_path = self.doc_root / "api" / f"{module.name}.rst"
-            module_path.parent.mkdir(parents=True, exist_ok=True)
             module_path.write_text(module.render())
         (self.doc_root / "api" / "_index.rst").write_text(
             render_modules_index(public_modules)
@@ -268,18 +278,19 @@ class Conf:
     email: str | None = None
     year: int | None = None
     extensions: list[str] = field(default_factory=DEFAULT_EXTENSIONS.copy)
-    theme: str = "alabaster"
+    theme: str = "default"
+    extra_options: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
     def from_pyproject(
         pyproject: PyProject,
         /,
         *,
+        theme: str,
         author: str | None = None,
         email: str | None = None,
         year: int | None = None,
         extensions: Iterable[str] = DEFAULT_EXTENSIONS,
-        theme: str = "alabaster",
         root: Path | None = None,
     ) -> Conf:
         """
@@ -332,19 +343,14 @@ class Conf:
         if self.email:
             author += f" <{self.email}>"
         yield f"author = {author!r}"
-
         yield f"extensions = {self.extensions!r}"
         yield "templates_path = ['_templates']"
-        yield "exclude_patterns = []"
-        yield "html_theme = 'alabaster'"
+        theme = SPHINX_THEME_ALIASES.get(self.theme, self.theme)
+        yield f"html_theme = {theme!r}"
         yield "html_static_path = ['_static']"
         yield "exclude_patterns = ['_readme.md']"
-        yield "html_theme_options = {"
-        yield "    'navigation_depth': 3,"
-        yield "    'collapse_navigation': False,"
-        yield "    'github_user': 'fabiommendes',"
-        yield "    'github_repo': 'doc0',"
-        yield "}"
+        for key, value in self.extra_options.items():
+            yield f"{key} = {value!r}"
 
 
 class Copyright(TypedDict):
