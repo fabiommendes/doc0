@@ -50,12 +50,7 @@ module-root = ""
 strict = true
 
 [dependency-groups]
-dev = [
-    "ruff>=0.15.15",
-    "pytest>=9.0.0",
-    "pytest-cov>=7.0.0",
-    "taskipy>=1.14.0",
-]
+dev = ["ruff>=0.15.15", "pytest>=9.0.0", "pytest-cov>=7.0.0", "taskipy>=1.14.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -78,3 +73,6 @@ release = """
         && uv run task build \\
         && git add . && git commit -m "Release $(uv version)" && git tag "v$(uv version --short)"
 """
+
+[tool.doc0]
+theme = "rtd"

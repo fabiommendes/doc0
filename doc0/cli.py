@@ -10,7 +10,7 @@ from typing import Annotated, Any
 import typer
 
 from .base import Doc0
-from .util import validate_theme
+from .util import maybe_map, validate_theme
 
 __all__ = [
     "main",
@@ -39,16 +39,18 @@ def test() -> None:
 @app.command()
 def build(
     theme: Annotated[
-        str,
+        str | None,
         typer.Option(
-            ..., "--theme", help="Select the Sphinx theme", callback=validate_theme
+            ...,
+            "--theme",
+            help="Select the Sphinx theme",
+            callback=maybe_map(validate_theme),
         ),
-    ] = "default",
+    ] = None,
 ) -> None:
     """
     Build the documentation for the current project.
     """
-    theme = validate_theme(theme)
     doc = Doc0.load(Path.cwd(), theme=theme)
     doc.build()
 
@@ -56,14 +58,18 @@ def build(
 @app.command()
 def serve(
     theme: Annotated[
-        str,
-        typer.Option(..., "--theme", help="Select the Sphinx theme"),
-    ] = "alabaster",
+        str | None,
+        typer.Option(
+            ...,
+            "--theme",
+            help="Select the Sphinx theme",
+            callback=maybe_map(validate_theme),
+        ),
+    ] = None,
 ) -> None:
     """
     Serve the documentation in the live server.
     """
-    theme = validate_theme(theme)
     doc = Doc0.load(Path.cwd(), theme=theme)
     doc.serve()
 

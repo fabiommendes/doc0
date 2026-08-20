@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from dataclasses import dataclass, field
+from importlib.metadata import version as module_version
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Iterable, Iterator, TypedDict
@@ -27,6 +28,30 @@ SPHINX_THEME_ALIASES = {
     "readthedocs": "sphinx_rtd_theme",
     "default": "alabaster",
 }
+READTHEDOCS_TEMPLATE = """
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+# Required
+version: 2
+
+# Set the OS, Python version, and other tools you might need
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.13"
+
+# Build documentation in the "docs/" directory with Sphinx
+sphinx:
+  configuration: docs/conf.py
+
+# Optionally, but recommended,
+# declare the Python requirements required to build your documentation
+# See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
+python:
+  install:
+    - requirements: docs/requirements.txt
+"""
 
 log = getLogger(__name__)
 
@@ -44,7 +69,7 @@ class Doc0:
     doc_root: Path
 
     #: The theme to use for the documentation.
-    theme: str = "alabaster"
+    theme: str
 
     @classmethod
     def load(
@@ -52,17 +77,21 @@ class Doc0:
         root: Path | None = None,
         /,
         *,
-        theme: str = "alabaster",
+        theme: str | None = None,
         docs: str = "docs",
     ) -> Doc0:
         """
         Load project in the given path.
         """
-
         root = root or Path.cwd()
+        pyproject = PyProject(root=root)
+
+        if theme is None:
+            theme = pyproject.get("tool.doc0.theme", default="default", type=str)
+
         return Doc0(
             doc_root=root / docs,
-            pyproject=PyProject(root=root),
+            pyproject=pyproject,
             theme=theme,
         )
 
@@ -90,6 +119,16 @@ class Doc0:
         # Write docs/index.rst and docs/api/*
         self.write_rst_files()
         self.write_readme_md()
+
+        # Write the Read the Docs configuration file, if it doesn't exist.
+        rtd_path = self.root / ".readthedocs.yml"
+        if not rtd_path.exists():
+            rtd_path.write_text(READTHEDOCS_TEMPLATE)
+
+        # Write the requirements.txt file for Read the Docs, if it doesn't exist.
+        req_path = self.root / "docs" / "requirements.txt"
+        if not req_path.exists():
+            req_path.write_text(f"doc0>={module_version('doc0')}")
 
     def build(self) -> None:
         """
@@ -333,23 +372,22 @@ class Conf:
         return "\n".join(self._iter_lines())
 
     def _iter_lines(self) -> Iterator[str]:
-        yield f"project = {self.project or 'unnamed project'!r}"
-
+        theme = SPHINX_THEME_ALIASES.get(self.theme, self.theme)
         copyright = f"{self.year}, " if self.year else ""
         copyright += self.author or "unknown author"
-        yield f"copyright = {copyright!r}"
-
         author = self.author or "unknown author"
         if self.email:
             author += f" <{self.email}>"
+
+        yield f"project = {self.project or 'unnamed project'!r}"
+        yield f"copyright = {copyright!r}"
         yield f"author = {author!r}"
         yield f"extensions = {self.extensions!r}"
         yield "templates_path = ['_templates']"
-        theme = SPHINX_THEME_ALIASES.get(self.theme, self.theme)
         yield f"html_theme = {theme!r}"
         yield "html_static_path = ['_static']"
-        yield "exclude_patterns = ['_readme.md']"
-        for key, value in self.extra_options.items():
+        yield "exclude_patterns = ['_readme.md', 'requirements.txt']"
+        for key, value in sorted(self.extra_options.items()):
             yield f"{key} = {value!r}"
 
 

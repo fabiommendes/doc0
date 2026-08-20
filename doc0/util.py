@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Callable, Iterable, overload
 
 
 def validate_theme(theme: str) -> str:
@@ -26,6 +26,29 @@ def validate_theme(theme: str) -> str:
             raise ValueError(f"'{theme}' is not a valid Sphinx theme.")
 
     return theme
+
+
+@overload
+def maybe_map[T, R](fn: Callable[[T], R], value: T | None, /) -> R | None: ...
+
+
+@overload
+def maybe_map[T, R](fn: Callable[[T], R], /) -> Callable[[T | None], R | None]: ...
+
+
+def maybe_map[T, R](fn: Callable[[T], R], /, *args: Any) -> Any:
+    """
+    Apply a function to a value if it is not None, otherwise return None.
+
+    Curried.
+    """
+    if args:
+        value = args[0]
+        if value is not None:
+            return fn(value)
+    else:
+        return lambda value: maybe_map(fn, value)
+    return None
 
 
 def first_existing(paths: Iterable[Path]) -> Path | None:
