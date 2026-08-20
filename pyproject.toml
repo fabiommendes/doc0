@@ -51,12 +51,22 @@ strict = true
 [dependency-groups]
 dev = [
     "ruff>=0.15.15",
+    "pytest>=9.0.0",
+    "pytest-cov>=7.0.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["doc0"]
+omit = ["doc0/__main__.py"]
 
 [tool.taskipy.tasks]
 docs = { cmd = "sphinx-build -b html docs/source docs/build -n", help = "Build HTML documentation" }
 docs-serve = { cmd = "sphinx-autobuild docs/source docs/build -n", help = "Serve HTML documentation with live reload" }
 test = "pytest tests"
+coverage = "pytest tests --cov=doc0 --cov-report=term-missing"
 lint = "ruff check ."
 build = "uv build"
 release = """

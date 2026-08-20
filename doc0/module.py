@@ -52,7 +52,15 @@ class ModuleSpec:
         if self.name in sys.modules:
             module = sys.modules[self.name]
         else:
-            spec = importlib.util.spec_from_file_location(self.name, self.path)
+            if self.is_package:
+                submodule_search_locations = [str(self.path)]
+            else:
+                submodule_search_locations = None
+            spec = importlib.util.spec_from_file_location(
+                name=self.name,
+                location=self.source_path,
+                submodule_search_locations=submodule_search_locations,
+            )
             if spec is None:
                 raise ImportError(f"Cannot load module {self.name} from {self.path}")
             module = importlib.util.module_from_spec(spec)

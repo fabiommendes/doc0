@@ -6,5 +6,4 @@ Modules
    :caption: Contents:
 
    doc0
-   doc0.util
    doc0.cli

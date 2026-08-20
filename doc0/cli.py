@@ -12,7 +12,7 @@ import typer
 from .base import Doc0
 from .util import validate_theme
 
-__all__ = ["test", "build", "serve", "main"]
+__all__ = ["test", "build", "serve", "main", "app"]
 
 app = typer.Typer(
     name="doc0",
@@ -62,7 +62,7 @@ def serve(
     doc.serve()
 
 
-def _debug(*args: Any, **kwargs: Any) -> None:
+def _debug(*args: Any, **kwargs: Any) -> None:  # pragma: no cover
     import rich
     from rich.panel import Panel
 

@@ -14,7 +14,7 @@ type ModuleName = str
 
 NOT_GIVEN: Any = object()
 COPYRIGHT_RE = re.compile(
-    r"[cC]opyright\s+(?:\(c\)\s+)?(?P<year>\d+)\s*(:?,\s+(?P<author>[^\n]+))?"
+    r"[cC]opyright\s+(?:\(c\)\s+)?(?P<year>\d+)\s*(:?,?\s+(?P<author>[^\n]+))?"
 )
 DEFAULT_EXTENSIONS = [
     "sphinx.ext.autodoc",

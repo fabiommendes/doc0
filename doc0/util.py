@@ -1,10 +1,3 @@
-"""
-Utility functions for the doc0 package.
-"""
-
-__all__ = ["validate_theme"]
-
-
 from pathlib import Path
 from typing import Iterable
 
