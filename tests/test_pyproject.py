@@ -115,20 +115,11 @@ def test_get_with_type_returns_value_when_type_matches(tmp_path):
     assert project.get("project.name", type=str) == "acme"
 
 
-def test_get_with_type_mismatch_raises(tmp_path):
-    """
-    Characterization test.
-
-    get()'s ``type`` keyword-only parameter shadows the builtin ``type()``
-    inside its own error-formatting f-string (``type(value).__name__``), so
-    on a mismatch it does not raise the intended ``TypeError`` with a clean
-    message -- it raises whatever exception the wrong-type constructor call
-    produces instead (here, ``int("1.0.0")`` raises ValueError).
-    """
+def test_get_with_type_mismatch_raises_typeerror_with_clean_message(tmp_path):
     make_pyproject_toml(tmp_path, name="acme", version="1.0.0")
     project = PyProject(root=tmp_path)
 
-    with pytest.raises(ValueError, match="invalid literal for int"):
+    with pytest.raises(TypeError, match="Expected project.version to be of type int, got str"):
         project.get("project.version", type=int)
 
 

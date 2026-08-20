@@ -53,6 +53,7 @@ dev = [
     "ruff>=0.15.15",
     "pytest>=9.0.0",
     "pytest-cov>=7.0.0",
+    "taskipy>=1.14.0",
 ]
 
 [tool.pytest.ini_options]

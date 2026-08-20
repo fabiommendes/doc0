@@ -86,7 +86,7 @@ class PyProject:
         except KeyError:
             value = default
         if type is not None and value is not None and not isinstance(value, type):
-            msg = f"Expected {key} to be of type {type.__name__}, got {type(value).__name__}"
+            msg = f"Expected {key} to be of type {type.__name__}, got {value.__class__.__name__}"
             raise TypeError(msg)
         return value
 
