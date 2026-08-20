@@ -128,7 +128,7 @@ class Doc0:
         # Write the requirements.txt file for Read the Docs, if it doesn't exist.
         req_path = self.root / "docs" / "requirements.txt"
         if not req_path.exists():
-            req_path.write_text(f"doc0>={module_version('doc0')}")
+            req_path.write_text(f"doc-zero>={module_version('doc0')}")
 
     def build(self) -> None:
         """

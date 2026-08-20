@@ -1,6 +1,6 @@
 [project]
 name = "doc-zero"
-version = "0.1.1"
+version = "0.1.2"
 description = "Zero-configuration documentation generator for Python."
 readme = "README.md"
 authors = [
@@ -31,9 +31,9 @@ classifiers = [
 license = "MIT"
 
 [project.urls]
-Homepage = "http://github.com/fabiommendes/zero-doc"
-Repository = "http://github.com/fabiommendes/zero-doc"
-Documentation = "https://zero-doc.readthedocs.io/"
+Homepage = "http://github.com/fabiommendes/doc0"
+Repository = "http://github.com/fabiommendes/doc0"
+Documentation = "https://doc-zero.readthedocs.io/"
 
 [project.scripts]
 doc0 = "doc0.cli:main"
@@ -61,8 +61,8 @@ source = ["doc0"]
 omit = ["doc0/__main__.py"]
 
 [tool.taskipy.tasks]
-docs = { cmd = "sphinx-build -b html docs/source docs/build -n", help = "Build HTML documentation" }
-docs-serve = { cmd = "sphinx-autobuild docs/source docs/build -n", help = "Serve HTML documentation with live reload" }
+docs = { cmd = "uv run doc-zero build", help = "Build HTML documentation" }
+docs-serve = { cmd = "uv run doc-zero serve", help = "Serve HTML documentation with live reload" }
 test = "pytest tests"
 coverage = "pytest tests --cov=doc0 --cov-report=term-missing"
 lint = "ruff check ."

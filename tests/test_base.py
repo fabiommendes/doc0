@@ -33,7 +33,7 @@ def test_load_builds_doc_root_under_docs_by_default(tmp_path):
 
     assert doc.doc_root == tmp_path / "docs"
     assert doc.root == tmp_path
-    assert doc.theme == "alabaster"
+    assert doc.theme == "default"
 
 
 def test_load_accepts_custom_docs_dir_and_theme(tmp_path):

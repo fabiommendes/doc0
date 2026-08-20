@@ -1,5 +1,3 @@
-# doc-zero
-
 **Doc-zero** streamlines the process of writing documentation for your project. It is
 an opinionated and explicitly non-configurable tool that extracts information
 from your Python codebase and generates nice documentation with minimal effort.
@@ -70,4 +68,3 @@ following conditions:
 * The module defines a `__all__` variable that lists its public API.
 
 `doc-zero` only includes the public API in the generated documentation. 
-
