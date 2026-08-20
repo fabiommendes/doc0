@@ -1,4 +1,4 @@
-# Agent instructions for doc0
+# Agent instructions for doc-zero
 
 This file orients coding agents (and humans) working in this repository.
 `CLAUDE.md` in this same directory is a symlink to this file, so both
@@ -6,7 +6,7 @@ Claude Code and generic "AGENTS.md" tooling read the same content.
 
 ## What this project is
 
-`doc0` is a zero-configuration documentation generator for Python
+`doc-zero` is a zero-configuration documentation generator for Python
 projects. It introspects a project's `pyproject.toml` and source tree,
 then generates and drives a Sphinx project under `<root>/docs`. See
 README.md for the user-facing pitch.
@@ -25,15 +25,15 @@ uv sync --all-groups   # installs runtime deps + the dev group (ruff, pytest, py
 
 All defined as taskipy tasks in `pyproject.toml`; run with `uv run task <name>`.
 
-| Task | Command | Purpose |
-|---|---|---|
-| `test` | `pytest tests` | Run the test suite |
-| `coverage` | `pytest tests --cov=doc0 --cov-report=term-missing` | Run tests with coverage report |
-| `lint` | `ruff check .` | Lint |
-| `docs` | `sphinx-build -b html docs/source docs/build -n` | Build doc0's own documentation |
-| `docs-serve` | `sphinx-autobuild docs/source docs/build -n` | Live-reload doc server |
-| `build` | `uv build` | Build distributable package |
-| `release` | lint + test + docs + build + tag | Full release flow |
+| Task         | Command                                             | Purpose                            |
+| ------------ | --------------------------------------------------- | ---------------------------------- |
+| `test`       | `pytest tests`                                      | Run the test suite                 |
+| `coverage`   | `pytest tests --cov=doc0 --cov-report=term-missing` | Run tests with coverage report     |
+| `lint`       | `ruff check .`                                      | Lint                               |
+| `docs`       | `sphinx-build -b html docs/source docs/build -n`    | Build doc-zero's own documentation |
+| `docs-serve` | `sphinx-autobuild docs/source docs/build -n`        | Live-reload doc server             |
+| `build`      | `uv build`                                          | Build distributable package        |
+| `release`    | lint + test + docs + build + tag                    | Full release flow                  |
 
 CI (`.github/workflows/ci.yml`) runs `lint` and `coverage` on every push
 and PR. A change is not done until both pass locally.
@@ -73,7 +73,7 @@ short:
   methods directly -- exercise them indirectly through a realistic scenario.
 - Build fixture projects on disk with the helpers in `tests/conftest.py`
   (`make_pyproject_toml`, `make_package`, `make_module_file`, `write`) rather
-  than mocking doc0's own internals.
+  than mocking doc-zero's own internals.
 - `Doc0.build()`/`serve()` import Sphinx/sphinx-autobuild lazily; the
   `fake_sphinx` fixture stubs those imports via `sys.modules` so tests don't
   need the real (heavy) dependencies installed.

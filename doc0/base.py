@@ -87,7 +87,7 @@ class Doc0:
         pyproject = PyProject(root=root)
 
         if theme is None:
-            theme = pyproject.get("tool.doc0.theme", default="default", type=str)
+            theme = pyproject.get("tool.doc-zero.theme", default="default", type=str)
 
         return Doc0(
             doc_root=root / docs,

@@ -1,6 +1,6 @@
-# doc0
+# doc-zero
 
-`doc0` streamlines the process of writing documentation for your project. It is
+`doc-zero` streamlines the process of writing documentation for your project. It is
 an opinionated and explicitly non-configurable tool that extracts information
 from your Python codebase and generates nice documentation with minimal effort.
 

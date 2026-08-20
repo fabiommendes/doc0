@@ -1,6 +1,6 @@
 [project]
-name = "doc0"
-version = "0.1.0"
+name = "doc-zero"
+version = "0.1.1"
 description = "Zero-configuration documentation generator for Python."
 readme = "README.md"
 authors = [
@@ -37,6 +37,7 @@ Documentation = "https://zero-doc.readthedocs.io/"
 
 [project.scripts]
 doc0 = "doc0.cli:main"
+doc-zero = "doc0.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.3,<0.12.0"]
@@ -74,5 +75,5 @@ release = """
         && git add . && git commit -m "Release $(uv version)" && git tag "v$(uv version --short)"
 """
 
-[tool.doc0]
+[tool.doc-zero]
 theme = "rtd"
