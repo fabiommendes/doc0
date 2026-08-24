@@ -5,11 +5,9 @@ Scenario tests for doc0's project-introspection public API: ``PyProject``.
 from __future__ import annotations
 
 import pytest
-
-from doc0 import PyProject
-
 from conftest import make_module_file, make_package, make_pyproject_toml
 
+from doc0 import PyProject
 
 # ---------------------------------------------------------------------------
 # Loading pyproject.toml
@@ -39,7 +37,9 @@ def test_present_pyproject_toml_is_parsed_without_warning(tmp_path, recwarn):
 
 
 def test_name_version_description_properties(tmp_path):
-    make_pyproject_toml(tmp_path, name="acme", version="1.2.3", description="Acme tools.")
+    make_pyproject_toml(
+        tmp_path, name="acme", version="1.2.3", description="Acme tools."
+    )
 
     project = PyProject(root=tmp_path)
 
@@ -66,7 +66,7 @@ def test_authors_property_parses_name_and_email(tmp_path):
     authors = project.authors
 
     assert authors[0]["name"] == "Ada Lovelace"
-    assert authors[0]["email"] == "ada@example.com"
+    assert authors[0].get("email") == "ada@example.com"
     assert authors[1]["name"] == "Alan Turing"
     assert "email" not in authors[1]
 
@@ -119,7 +119,9 @@ def test_get_with_type_mismatch_raises_typeerror_with_clean_message(tmp_path):
     make_pyproject_toml(tmp_path, name="acme", version="1.0.0")
     project = PyProject(root=tmp_path)
 
-    with pytest.raises(TypeError, match="Expected project.version to be of type int, got str"):
+    with pytest.raises(
+        TypeError, match="Expected project.version to be of type int, got str"
+    ):
         project.get("project.version", type=int)
 
 
@@ -129,7 +131,9 @@ def test_get_with_type_mismatch_raises_typeerror_with_clean_message(tmp_path):
 
 
 def test_find_root_modules_uv_layout_single_module_name(tmp_path):
-    make_pyproject_toml(tmp_path, name="acme", build_backend="uv_build", module_name="acme")
+    make_pyproject_toml(
+        tmp_path, name="acme", build_backend="uv_build", module_name="acme"
+    )
     make_package(tmp_path / "acme", docstring="acme module")
 
     project = PyProject(root=tmp_path)
@@ -169,7 +173,9 @@ def test_find_root_modules_uv_layout_with_module_root_prefix(tmp_path):
 
 
 def test_find_root_modules_uv_layout_without_module_name_yields_nothing(tmp_path):
-    make_pyproject_toml(tmp_path, name="acme", build_backend="uv_build", module_name=None)
+    make_pyproject_toml(
+        tmp_path, name="acme", build_backend="uv_build", module_name=None
+    )
 
     project = PyProject(root=tmp_path)
 
@@ -216,7 +222,9 @@ def test_find_root_modules_toplevel_package_layout(tmp_path):
     assert spec.path == tmp_path / "acme"
 
 
-def test_find_root_modules_src_dir_present_but_empty_of_packages_is_not_src_layout(tmp_path):
+def test_find_root_modules_src_dir_present_but_empty_of_packages_is_not_src_layout(
+    tmp_path,
+):
     make_pyproject_toml(tmp_path, name="acme", build_backend=None)
     # A "src" directory exists, but none of its entries is a package (a
     # directory containing __init__.py) -- so _is_src_layout() must still
@@ -243,7 +251,9 @@ def test_find_root_modules_raises_when_layout_cannot_be_determined(tmp_path):
 def test_find_root_modules_prefers_uv_layout_over_toplevel(tmp_path):
     # If a uv build-backend is declared, that heuristic wins even if a
     # same-named toplevel package also happens to exist.
-    make_pyproject_toml(tmp_path, name="acme", build_backend="uv_build", module_name="other")
+    make_pyproject_toml(
+        tmp_path, name="acme", build_backend="uv_build", module_name="other"
+    )
     make_package(tmp_path / "other")
     make_package(tmp_path / "acme")
 

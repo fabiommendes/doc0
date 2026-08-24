@@ -130,7 +130,7 @@ class PyProject:
         return package_dir.is_dir() and (package_dir / "__init__.py").exists()
 
     def _find_uv_root_modules(self) -> Iterable[ModuleSpec]:
-        uv_conf = self.get("tool.uv.build-backend", type=dict)
+        uv_conf = self.get("tool.uv.build-backend", type=dict, default={})
         root = self.root / uv_conf.get("module-root", "")
         name = uv_conf.get("module-name")
         if name is None:
