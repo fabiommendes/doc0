@@ -11,6 +11,8 @@ public entry point, is responsible for.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from conftest import make_module_file, make_pyproject_toml
 from typer.testing import CliRunner
@@ -174,7 +176,9 @@ def test_invalid_theme_is_a_clean_usage_error_naming_its_source(
 
     assert result.exit_code == 2
     assert isinstance(result.exception, SystemExit)  # no traceback
-    assert "'bad theme'" in result.output
-    assert source in result.output
+    # Typer forces rich styling under GITHUB_ACTIONS, which splits "--theme".
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "'bad theme'" in output
+    assert source in output
     assert not fake_sphinx[command].calls
     assert not (tmp_path / "docs").exists()
