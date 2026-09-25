@@ -1,5 +1,10 @@
 # doc-zero
 
+[![PyPI](https://img.shields.io/pypi/v/doc-zero.svg)](https://pypi.org/project/doc-zero/)
+[![CI](https://github.com/fabiommendes/doc0/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fabiommendes/doc0/actions/workflows/ci.yml)
+[![Documentation Status](https://readthedocs.org/projects/doc-zero/badge/?version=latest)](https://doc-zero.readthedocs.io/en/latest/)
+[![Coverage Status](https://coveralls.io/repos/github/fabiommendes/doc0/badge.svg?branch=main)](https://coveralls.io/github/fabiommendes/doc0?branch=main)
+
 **Doc-zero** streamlines the process of writing documentation for your project. It is
 an opinionated and explicitly non-configurable tool that extracts information
 from your Python codebase and generates nice documentation with minimal effort.
@@ -71,3 +76,5 @@ following conditions:
 
 `doc-zero` only includes the public API in the generated documentation. 
 
+
+## Adding extra documentation
