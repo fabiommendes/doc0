@@ -6,7 +6,17 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
+# Tools
 .venv
 .coverage
 .vscode/
+.claude/
+.base-ast/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Agentic paths
+prompt.md
+prompts/
+dev/
