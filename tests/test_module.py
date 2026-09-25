@@ -8,6 +8,7 @@ import pytest
 from conftest import make_module_file, make_package
 
 from doc0 import Module, ModuleSpec
+from doc0.module import find_public_modules
 
 # ---------------------------------------------------------------------------
 # ModuleSpec construction
@@ -169,25 +170,32 @@ def test_load_module_raises_for_invalid_source(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_iter_submodules_walks_files_and_packages(tmp_path):
+def test_iter_submodules_walks_files_and_packages_in_sorted_order(tmp_path):
     root = make_package(tmp_path / "app")
     make_module_file(root / "util.py")
     sub_pkg = make_package(root / "sub")
     make_module_file(sub_pkg / "deep.py")
 
     spec = ModuleSpec(name="app", path=root)
-    found = {s.name for s in spec.iter_submodules()}
+    found = [s.name for s in spec.iter_submodules()]
 
-    # Note: iter_submodules() also yields each package's own __init__.py as
-    # a pseudo-submodule (e.g. "app.__init__"), since it does not special-
-    # case that filename when walking .py files in a package directory.
-    assert found == {
-        "app.util",
-        "app.sub",
-        "app.sub.deep",
-        "app.__init__",
-        "app.sub.__init__",
-    }
+    # A package's own __init__.py is the package itself, never a submodule.
+    assert found == ["app.sub", "app.sub.deep", "app.util"]
+
+
+def test_iter_submodules_order_does_not_depend_on_creation_order(tmp_path):
+    root = make_package(tmp_path / "app")
+    for name in ("zeta", "alpha", "mid", "beta"):
+        make_module_file(root / f"{name}.py")
+
+    spec = ModuleSpec(name="app", path=root)
+
+    assert [s.name for s in spec.iter_submodules()] == [
+        "app.alpha",
+        "app.beta",
+        "app.mid",
+        "app.zeta",
+    ]
 
 
 def test_iter_submodules_skip_private_excludes_underscore_prefixed(tmp_path):
@@ -195,11 +203,23 @@ def test_iter_submodules_skip_private_excludes_underscore_prefixed(tmp_path):
     make_module_file(root / "public.py")
     make_module_file(root / "_private.py")
     make_package(root / "_hidden")
+    make_module_file(root / "_hidden" / "inner.py")
 
     spec = ModuleSpec(name="app", path=root)
-    found = {s.name for s in spec.iter_submodules(skip_private=True)}
+    found = [s.name for s in spec.iter_submodules(skip_private=True)]
 
-    assert found == {"app.public"}
+    assert found == ["app.public"]
+
+
+def test_iter_submodules_skips_names_that_are_not_python_identifiers(tmp_path):
+    root = make_package(tmp_path / "app")
+    make_module_file(root / "ok.py")
+    make_module_file(root / "my-script.py")
+    make_module_file(root / "static-files" / "helper.py")
+
+    spec = ModuleSpec(name="app", path=root)
+
+    assert [s.name for s in spec.iter_submodules()] == ["app.ok"]
 
 
 def test_iter_submodules_on_a_plain_module_yields_nothing(tmp_path):
@@ -216,11 +236,137 @@ def test_iter_submodules_recurses_into_dir_without_init_but_does_not_yield_it(tm
     (root / "not_a_package" / "orphan.py").write_text("x = 1\n")
 
     spec = ModuleSpec(name="app", path=root)
-    found = {s.name for s in spec.iter_submodules()}
+    found = [s.name for s in spec.iter_submodules()]
 
     # The directory itself is never yielded as a spec (no __init__.py), but
     # iter_submodules still recurses into it and picks up .py files there.
-    assert found == {"app.__init__", "app.not_a_package.orphan"}
+    assert found == ["app.not_a_package.orphan"]
+
+
+# ---------------------------------------------------------------------------
+# find_public_modules()
+# ---------------------------------------------------------------------------
+#
+# Each row is a fixture tree under tmp_path: path -> docstring (None = no
+# docstring). Paths ending in "/" are packages; "ns/x.py" under a dir with
+# no "/"-entry is a plain (namespace) directory. The roots are given as
+# (name, relative path); the expected value is the ordered list of names.
+
+DOC = "Documented."
+
+PUBLIC_MODULE_CASES = [
+    pytest.param(
+        {"solo.py": None},
+        [("solo", "solo.py")],
+        ["solo"],
+        id="root-module-is-public-even-without-docstring",
+    ),
+    pytest.param(
+        {
+            "pm_a/": DOC,
+            "pm_a/zeta.py": DOC,
+            "pm_a/alpha.py": DOC,
+            "pm_a/nodoc.py": None,
+            "pm_a/_private.py": DOC,
+            "pm_a/_hidden/": DOC,
+            "pm_a/_hidden/inner.py": DOC,
+        },
+        [("pm_a", "pm_a")],
+        ["pm_a", "pm_a.alpha", "pm_a.zeta"],
+        id="private-and-docstringless-submodules-are-skipped",
+    ),
+    pytest.param(
+        {
+            "pm_b/": None,
+            "pm_b/sub/": DOC,
+            "pm_b/sub/deep.py": DOC,
+            "pm_b/ns/orphan.py": DOC,
+            "pm_b/undocumented/": None,
+            "pm_b/undocumented/inner.py": DOC,
+        },
+        [("pm_b", "pm_b")],
+        [
+            "pm_b",
+            "pm_b.ns.orphan",
+            "pm_b.sub",
+            "pm_b.sub.deep",
+            "pm_b.undocumented.inner",
+        ],
+        id="nested-packages-and-namespace-dirs",
+    ),
+    pytest.param(
+        {"pm_one/": DOC, "pm_one/x.py": DOC, "pm_two/": DOC, "pm_two/y.py": DOC},
+        [("pm_one", "pm_one"), ("pm_two", "pm_two")],
+        ["pm_one", "pm_two", "pm_one.x", "pm_two.y"],
+        id="roots-first-then-submodules-of-each-root",
+    ),
+]
+
+
+def build_tree(root, tree):
+    for rel, docstring in tree.items():
+        if rel.endswith("/"):
+            make_package(root / rel.rstrip("/"), docstring=docstring)
+        else:
+            make_module_file(root / rel, docstring=docstring)
+
+
+@pytest.mark.parametrize(("tree", "roots", "expected"), PUBLIC_MODULE_CASES)
+def test_find_public_modules(tmp_path, tree, roots, expected):
+    build_tree(tmp_path, tree)
+    specs = [ModuleSpec(name=name, path=tmp_path / rel) for name, rel in roots]
+
+    modules = find_public_modules(specs)
+
+    assert [m.name for m in modules] == expected
+    assert all(isinstance(m, Module) for m in modules)
+
+
+def test_find_public_modules_warns_about_missing_or_empty_all(tmp_path, caplog):
+    pkg = make_package(tmp_path / "pm_w", docstring="Root, no __all__.")
+    make_module_file(pkg / "api.py", docstring="Public API.", all_=["thing"])
+    make_module_file(pkg / "legacy.py", docstring="No __all__ here.")
+    make_module_file(pkg / "empty.py", docstring="Exports nothing.", all_=[])
+
+    with caplog.at_level("WARNING"):
+        find_public_modules([ModuleSpec(name="pm_w", path=pkg)])
+
+    messages = [r.message for r in caplog.records if r.levelname == "WARNING"]
+    assert messages == [
+        "Module pm_w.empty do not export any symbols",
+        "Module pm_w.legacy has no __all__ attribute",
+    ]
+
+
+def test_find_public_modules_names_the_module_that_failed_to_import(tmp_path):
+    pkg = make_package(tmp_path / "pm_err")
+    broken = make_module_file(pkg / "broken.py", body="this is not valid python !!!")
+
+    with pytest.raises(SyntaxError) as excinfo:
+        find_public_modules([ModuleSpec(name="pm_err", path=pkg)])
+
+    notes = "\n".join(getattr(excinfo.value, "__notes__", []))
+    assert "pm_err.broken" in notes
+    assert str(broken) in notes
+
+
+def test_find_public_modules_relative_import_fails_when_project_is_not_importable(
+    tmp_path,
+):
+    """
+    Characterization of a known limitation (see AGENTS.md "Known rough
+    edges"): load_module() never registers the loaded root package in
+    sys.modules, so a submodule doing ``from .util import X`` only works if
+    the project is importable by other means (e.g. installed in the
+    environment, which ``uv sync`` does for uv projects). Here it is not,
+    so the relative import fails.
+    """
+    pkg = make_package(tmp_path / "pm_rel", docstring="Root.")
+    make_module_file(pkg / "util.py", docstring="Util.", body="X = 1\n")
+    make_module_file(pkg / "api.py", docstring="Api.", body="from .util import X\n")
+
+    with pytest.raises(ModuleNotFoundError, match="pm_rel"):
+        find_public_modules([ModuleSpec(name="pm_rel", path=pkg)])
 
 
 # ---------------------------------------------------------------------------

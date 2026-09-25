@@ -1,11 +1,5 @@
 # Agent instructions for doc-zero
 
-This file orients coding agents (and humans) working in this repository.
-`CLAUDE.md` in this same directory is a symlink to this file, so both
-Claude Code and generic "AGENTS.md" tooling read the same content.
-
-## What this project is
-
 `doc-zero` is a zero-configuration documentation generator for Python
 projects. It introspects a project's `pyproject.toml` and source tree,
 then generates and drives a Sphinx project under `<root>/docs`. See
@@ -40,20 +34,52 @@ and PR. A change is not done until both pass locally.
 
 ## Source layout
 
-- `doc0/base.py` -- `Doc0` (the main entry point: `load`/`init`/`build`/`serve`/`test`),
-  plus `Conf`, `Index`, and the rendering helpers they use.
-- `doc0/pyproject.py` -- `PyProject`: parses `pyproject.toml` and detects the
-  project's layout (uv build-backend / src / toplevel package) to find root modules.
+- `doc0/base.py` -- `Doc0` (the main entry point: `load`/`init`/`generate`/`build`/`serve`/`test`),
+  plus `Conf`, `Index`, and the rendering helpers they use. `generate()` is
+  the pure step: it reads project inputs (pyproject, README, LICENSE,
+  diataxis entries, source modules) and returns a `doc0.tree.DocTree`
+  describing the whole doc tree as data, without writing anything. `init()`
+  is just `self.generate().write()`.
+- `doc0/tree.py` -- `DocTree`/`DocFile`/`WritePolicy`: the doc tree as data
+  (absolute path -> content + `OVERWRITE`/`IF_MISSING` policy) and the one
+  place that touches disk to write it (`DocTree.write()`), including
+  clearing `owned_dirs` (e.g. `docs/api`) so stale generated files vanish.
+- `doc0/pyproject.py` -- `PyProject`: parses `pyproject.toml` and resolves the
+  project's layout to find root modules. `find_root_modules()` derives the
+  shared facts once (`_ProjectFacts`: normalized name, build backend, uv
+  config), then tries `uv_build` -> `src` -> `toplevel` in order; each
+  `_resolve_*_layout` returns root modules or raises `_LayoutInapplicable`
+  with a reason. If none applies, one `RuntimeError` lists every reason.
+  Add new layouts there, not as separate detector/finder pairs.
 - `doc0/module.py` -- `ModuleSpec` (locate + load a module from disk) and
   `Module` (a loaded module's docstring/exports/rendering). `Module.render()`
   uses `doc0/exports.py` to decide between an ordered, sectioned listing and
-  a plain `automodule` fallback.
+  a plain `automodule` fallback. `find_public_modules(roots)` (internal, not
+  re-exported) is the single place that decides which modules get
+  documented and in what order: roots always, then docstring-bearing,
+  non-`_` submodules in sorted `iter_submodules()` order, warning about
+  missing/empty `__all__`. `Doc0.generate()` just consumes its result.
 - `doc0/exports.py` -- internal (not re-exported): statically parses a
   module's `__all__` literal via `ast` + `tokenize` into ordered,
   `#:`-delimited sections with optional multi-paragraph body text, when it
   can be done reliably (see the module docstring for the exact rules and a
   documented edge-case limitation). Falls back to `None` for anything
   dynamic, computed, or that doesn't match the module's runtime `__all__`.
+- `doc0/theme.py` -- internal: `resolve_theme(cli_theme, pyproject)` is the
+  one place the Sphinx theme is decided: precedence (`--theme` >
+  `[tool.doc-zero] theme` > `"default"`), then validation, then alias
+  expansion (`rtd`/`readthedocs` -> `sphinx_rtd_theme`, `default` ->
+  `alabaster`). `Doc0.load` calls it, so `Doc0.theme` always holds the
+  resolved Sphinx name; invalid values raise `ThemeError` (a `ValueError`)
+  naming their source, which the CLI turns into a usage error (exit 2).
+- `doc0/readme.py` -- internal: `readme_body(src)` turns README.md into the
+  docs front page (`_readme.md`). After a `<!-- doc-zero-start -->` (or
+  legacy `<!-- doc0-start -->`) marker, the rest is kept verbatim; otherwise
+  badge-only lines (known hosts in `BADGE_HOSTS`, or "badge" in the image
+  URL path), their orphaned link definitions, and the leading title are
+  removed. Badges inline in prose and inside code fences are kept. In both
+  modes, a `<!-- doc-zero-end -->` (or `<!-- doc0-end -->`) marker drops
+  itself and everything after it.
 - `doc0/util.py` -- small standalone helpers (`validate_theme`, `first_existing`).
 - `doc0/cli.py` -- the `doc0` console script, built with Typer (`app.command()`
   for `build`/`serve`/`test`).
@@ -89,6 +115,36 @@ Aim for coverage close to 100% on `doc0/`; gaps should be either genuinely
 unreachable defensive code (call this out explicitly) or a signal that a
 public code path needs a new scenario.
 
+## Agentic workflow and paths
+
+The `prompts/` directory contains reusable prompt templates for coding agents.
+
+The `dev/` directory is an issue tracker:
+- `dev/issues/*.md` - Individual issue files in Markdown format.
+- `dev/spec/to-do/*.md` - Specification files for tasks that need to be done.
+- `dev/spec/to-review/*.md` - Specification files for tasks that have been completed. Removed after review.
+
+### Glossary
+
+Always read the list of definitions in the glossary using:
+
+```bash
+ grep -oP "^## \K.+" GLOSSARY.md
+```
+
+If you want to fetch the details of a definition, use:
+
+```bash
+awk  'BEGIN { IGNORECASE = 1 } /## <TERM>/{flag=1; next} /##/{flag=0} flag' GLOSSARY.md
+```
+
+replacing <TERM> with the term you want to look up.
+
+If a new concept or word is introduced in a conversation, ask the human if it
+should be added to the glossary. Be extremely succint when adding entries to the
+glossary. Add in alphabetical order.
+
+
 ## Code conventions
 
 - Python 3.13+, `from __future__ import annotations` at the top of modules
@@ -111,3 +167,17 @@ or fixed, so it stays a reliable map rather than stale trivia.
   in `doc0/__init__.py.__all__` are internal, but nothing enforces that at
   import time. Don't grow the public API by accident -- if something
   needs to become public, add it to `__all__` deliberately.
+- Layout resolution (`doc0/pyproject.py`) follows uv's rules: the
+  normalized name is lowercased with `-`/`.` -> `_`, even for the `toplevel`
+  layout, so a mixed-case package dir such as `Acme/` is not found. uv
+  stub packages (`foo-stubs` -> `foo-stubs/`) are not handled, and a
+  non-string `module-root` silently falls back to `"src"`.
+- Module loading (`ModuleSpec.load_module()`) reuses `sys.modules[name]`
+  when present and never registers what it loads. So (a) if a module of
+  the same name was already imported -- e.g. an installed copy of the
+  project, or doc0 documenting itself -- that copy is documented instead
+  of the source tree; and (b) a submodule using relative imports
+  (`from .util import x`) only loads if the project is importable some
+  other way (installed in the environment, as `uv sync` does); otherwise
+  generation aborts with `ModuleNotFoundError` (characterized in
+  `tests/test_module.py`).

@@ -19,6 +19,7 @@ import pytest
 from conftest import make_module_file, make_package, make_pyproject_toml, write
 
 from doc0 import Doc0
+from doc0.tree import DocTree, WritePolicy
 from tests.conftest import Recorder
 
 # ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ def test_load_builds_doc_root_under_docs_by_default(tmp_path):
 
     assert doc.doc_root == tmp_path / "docs"
     assert doc.root == tmp_path
-    assert doc.theme == "default"
+    assert doc.theme == "alabaster"
 
 
 def test_load_accepts_custom_docs_dir_and_theme(tmp_path):
@@ -43,6 +44,66 @@ def test_load_accepts_custom_docs_dir_and_theme(tmp_path):
 
     assert doc.doc_root == tmp_path / "site"
     assert doc.theme == "sphinx_rtd_theme"
+
+
+# (--theme / Doc0.load(theme=...), [tool.doc-zero] theme) -> Sphinx theme.
+# A pyproject value of None means the key is absent.
+THEME_CASES = [
+    pytest.param(None, None, "alabaster", id="default"),
+    pytest.param(None, '"rtd"', "sphinx_rtd_theme", id="pyproject-alias-rtd"),
+    pytest.param(
+        None, '"readthedocs"', "sphinx_rtd_theme", id="pyproject-alias-readthedocs"
+    ),
+    pytest.param(None, '"default"', "alabaster", id="pyproject-alias-default"),
+    pytest.param(None, '"furo"', "furo", id="pyproject-plain-name"),
+    pytest.param(
+        None, '"sphinx_material.theme"', "sphinx_material.theme", id="dotted-name"
+    ),
+    pytest.param("rtd", None, "sphinx_rtd_theme", id="cli-alias"),
+    pytest.param("sphinx_book_theme", '"rtd"', "sphinx_book_theme", id="cli-wins"),
+    pytest.param("default", '"furo"', "alabaster", id="cli-alias-wins"),
+    pytest.param("furo", '"bad theme"', "furo", id="unused-pyproject-value-ignored"),
+]
+
+THEME_ERROR_CASES = [
+    pytest.param("bad theme", None, ["'bad theme'", "--theme"], id="invalid-cli"),
+    pytest.param("", '"furo"', ["--theme"], id="empty-cli"),
+    pytest.param(
+        None, '"bad theme"', ["'bad theme'", "tool.doc-zero"], id="invalid-pyproject"
+    ),
+    pytest.param(None, "42", ["42", "tool.doc-zero"], id="non-string-pyproject"),
+]
+
+
+def theme_project(root: Path, pyproject_theme: str | None) -> Path:
+    extra = ""
+    if pyproject_theme is not None:
+        extra = f"\n[tool.doc-zero]\ntheme = {pyproject_theme}\n"
+    return make_loadable_project(root, name="acme", extra_toml=extra)
+
+
+@pytest.mark.parametrize(("cli", "pyproject_theme", "expected"), THEME_CASES)
+def test_load_resolves_theme(tmp_path, cli, pyproject_theme, expected):
+    theme_project(tmp_path, pyproject_theme)
+
+    doc = Doc0.load(tmp_path, theme=cli)
+
+    assert doc.theme == expected
+    conf = doc.generate().files[doc.doc_root / "conf.py"].content
+    assert f"html_theme = {expected!r}" in conf
+
+
+@pytest.mark.parametrize(("cli", "pyproject_theme", "fragments"), THEME_ERROR_CASES)
+def test_load_rejects_invalid_theme_naming_its_source(
+    tmp_path, cli, pyproject_theme, fragments
+):
+    theme_project(tmp_path, pyproject_theme)
+
+    with pytest.raises(ValueError) as excinfo:
+        Doc0.load(tmp_path, theme=cli)
+
+    for fragment in fragments:
+        assert fragment in str(excinfo.value)
 
 
 def test_load_defaults_root_to_cwd(tmp_path, monkeypatch):
@@ -63,19 +124,16 @@ def make_loadable_project(tmp_path, **toml_kwargs):
     """
     A project whose sole root module is a single .py file.
 
-    Goes through the "uv build system" layout heuristic with module-name
-    set to the literal filename "acme.py" (so the root module's name ends
-    up including the ".py" suffix, which is why assertions below reference
-    "acme.py" rather than "acme"). A normal package layout would work
-    fine too now that load_module() supports packages -- this shape is
-    just kept simple and dependency-free for tests that only care about
-    the docs-generation pipeline, not module layout detection (which has
-    its own coverage in test_pyproject.py).
+    Goes through the "uv build system" layout with module-name "acme" and
+    module-root "" (the project root), resolving to the single-file module
+    <root>/acme.py. This shape is kept simple and dependency-free for tests
+    that only care about the docs-generation pipeline, not module layout
+    detection (which has its own coverage in test_pyproject.py).
     """
     make_pyproject_toml(
         tmp_path,
         build_backend="uv_build",
-        module_name="acme.py",
+        module_name="acme",
         **toml_kwargs,
     )
     make_module_file(
@@ -87,322 +145,515 @@ def make_loadable_project(tmp_path, **toml_kwargs):
 
 
 # ---------------------------------------------------------------------------
-# write_rst_files() / init(): the package-loading bug, end to end
+# generate(): the doc tree as data
 # ---------------------------------------------------------------------------
 
 
-def test_write_rst_files_for_a_package_shaped_root_module(tmp_path):
-    """
-    A project laid out like doc0 itself (toplevel package with
-    __init__.py, not a single-file module) documents and builds fine.
-    """
+def generate(root: Path, **load_kwargs) -> tuple[Doc0, DocTree]:
+    doc = Doc0.load(root, **load_kwargs)
+    return doc, doc.generate()
+
+
+def snapshot(root: Path) -> dict[str, str | None]:
+    """Every path under *root*, with file contents (None for directories)."""
+    return {
+        str(p.relative_to(root)): (p.read_text() if p.is_file() else None)
+        for p in sorted(root.rglob("*"))
+        if "__pycache__" not in p.parts
+    }
+
+
+def test_generate_writes_nothing_to_disk(tmp_path: Path):
+    make_loadable_project(tmp_path, name="acme")  # no README.md, no docs/
+    before = snapshot(tmp_path)
+
+    Doc0.load(tmp_path).generate()
+
+    assert snapshot(tmp_path) == before
+
+
+def test_generate_lists_every_file_with_its_write_policy(tmp_path: Path):
+    make_loadable_project(tmp_path, name="acme")
+    doc, tree = generate(tmp_path)
+    docs = tmp_path / "docs"
+
+    assert {path: f.policy for path, f in tree.files.items()} == {
+        docs / "conf.py": WritePolicy.OVERWRITE,
+        docs / "index.rst": WritePolicy.OVERWRITE,
+        docs / "_readme.md": WritePolicy.OVERWRITE,
+        docs / "api" / "acme.rst": WritePolicy.OVERWRITE,
+        docs / "api" / "_index.rst": WritePolicy.OVERWRITE,
+        docs / "requirements.txt": WritePolicy.IF_MISSING,
+        tmp_path / ".readthedocs.yml": WritePolicy.IF_MISSING,
+    }
+    assert tree.dirs == [docs / "_static"]
+    assert tree.owned_dirs == [docs / "api"]
+
+
+def test_generate_requirements_pin_doc_zero(tmp_path: Path):
+    make_loadable_project(tmp_path, name="acme")
+    doc, tree = generate(tmp_path)
+
+    assert tree.files[doc.doc_root / "requirements.txt"].content.startswith(
+        "doc-zero>="
+    )
+
+
+def test_generate_places_everything_under_a_custom_docs_dir(tmp_path: Path):
+    """Regression: requirements.txt used to go to <root>/docs regardless."""
+    make_loadable_project(tmp_path, name="acme")
+    doc, tree = generate(tmp_path, docs="site")
+    site = tmp_path / "site"
+
+    assert site / "requirements.txt" in tree.files
+    outside_site = [p for p in tree.files if site not in p.parents]
+    assert outside_site == [tmp_path / ".readthedocs.yml"]
+
+    rtd = tree.files[tmp_path / ".readthedocs.yml"].content
+    assert "configuration: site/conf.py" in rtd
+    assert "requirements: site/requirements.txt" in rtd
+
+
+# --- API pages and public-module discovery ---------------------------------
+
+
+def test_generate_documents_a_package_shaped_root_module(tmp_path):
     make_pyproject_toml(tmp_path, name="acme", build_backend=None)
     make_package(tmp_path / "acme", docstring="The acme package.", all_=["main"])
 
-    doc = Doc0.load(tmp_path)
-    doc.write_rst_files()
+    doc, tree = generate(tmp_path)
 
-    assert (doc.doc_root / "api" / "_index.rst").exists()
-    assert (
-        "Welcome to the acme documentation!" in (doc.doc_root / "index.rst").read_text()
-    )
+    assert doc.doc_root / "api" / "acme.rst" in tree.files
+    index = tree.files[doc.doc_root / "index.rst"].content
+    assert "Welcome to the acme documentation!" in index
 
 
-def test_write_rst_files_scans_submodules_and_warns_on_missing_or_empty_all(
-    tmp_path, caplog
-):
+def test_generate_documents_exactly_the_public_modules_in_order(tmp_path):
+    """
+    Which modules are public, and in what order, is decided by
+    find_public_modules() (see test_module.py); generate() writes one page
+    per public module and lists them in that order in api/_index.rst.
+    """
     make_pyproject_toml(tmp_path, name="acme", build_backend=None)
     pkg = make_package(tmp_path / "acme", docstring="The acme package.", all_=["main"])
-    make_module_file(pkg / "api.py", docstring="Public API.", all_=["thing"])
-    make_module_file(pkg / "legacy.py", docstring="No __all__ here.")
-    make_module_file(pkg / "empty.py", docstring="Exports nothing.", all_=[])
-    make_module_file(pkg / "helpers.py", docstring=None, body="def helper(): ...\n")
-    make_module_file((pkg / "_private.py"))
+    for name in ("zeta", "alpha", "mid"):
+        make_module_file(pkg / f"{name}.py", docstring=f"{name}.", all_=[])
+    make_module_file(pkg / "helpers.py", docstring=None)
+    make_module_file(pkg / "_private.py")
 
-    doc = Doc0.load(tmp_path)
-    with caplog.at_level("WARNING"):
-        doc.write_rst_files()
+    doc, tree = generate(tmp_path)
 
-    api_index = (doc.doc_root / "api" / "_index.rst").read_text()
-    # The docstring-less "helpers" module is skipped entirely; the private
-    # module is never even considered (skip_private=True); the other three
-    # submodules are all documented, with or without __all__.
-    assert "   acme.api" in api_index
-    assert "   acme.legacy" in api_index
-    assert "   acme.empty" in api_index
-    assert "acme.helpers" not in api_index
-    assert "acme._private" not in api_index
-
-    assert (doc.doc_root / "api" / "acme.api.rst").exists()
-
-    messages = [record.message for record in caplog.records]
-    assert any("acme.legacy" in m and "no __all__" in m for m in messages)
-    assert any("acme.empty" in m and "do not export" in m for m in messages)
+    expected = ["acme", "acme.alpha", "acme.mid", "acme.zeta"]
+    api = doc.doc_root / "api"
+    pages = sorted(p.stem for p in tree.files if p.parent == api)
+    assert pages == sorted([*expected, "_index"])
+    api_index = tree.files[api / "_index.rst"].content
+    toctree = [
+        line.strip()
+        for line in api_index.splitlines()
+        if line.startswith("   ") and not line.strip().startswith(":")
+    ]
+    assert toctree == expected
 
 
-# ---------------------------------------------------------------------------
-# init() / write_rst_files(): happy path
-# ---------------------------------------------------------------------------
-
-
-def test_init_creates_doc_root_static_dir_conf_and_index(tmp_path: Path):
+def test_generate_api_page_and_index_for_single_file_module(tmp_path: Path):
     make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
+    doc, tree = generate(tmp_path)
 
-    doc.init()
-
-    assert doc.doc_root.is_dir()
-    assert (doc.doc_root / "_static").is_dir()
-    assert (doc.doc_root / "conf.py").exists()
-    assert (doc.doc_root / "index.rst").exists()
-    assert (doc.doc_root / "api" / "acme.py.rst").exists()
-    assert (doc.doc_root / "api" / "_index.rst").exists()
-
-
-def test_init_force_conf_and_force_index_overwrite_existing_files(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-    write(doc.doc_root / "conf.py", "# stale\n")
-    write(doc.doc_root / "index.rst", "stale\n")
-
-    doc.init()
-
-    assert "project = 'acme'" in (doc.doc_root / "conf.py").read_text()
-    assert "acme" in (doc.doc_root / "index.rst").read_text()
-
-
-def test_write_rst_files_index_contains_module_and_readme_include(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.write_rst_files()
-
-    index = (doc.doc_root / "index.rst").read_text()
-    assert "Welcome to the acme documentation!" in index
+    index = tree.files[doc.doc_root / "index.rst"].content
     assert ".. mdinclude:: _readme.md" in index
     assert "   api/_index" in index
 
-    api_index = (doc.doc_root / "api" / "_index.rst").read_text()
-    assert "   acme.py" in api_index
+    api_index = tree.files[doc.doc_root / "api" / "_index.rst"].content
+    assert "   acme" in api_index
 
-    module_rst = (doc.doc_root / "api" / "acme.py.rst").read_text()
-    assert module_rst.splitlines()[:2] == ["acme.py", "======="]
-    assert ".. automodule:: acme.py" in module_rst
+    module_rst = tree.files[doc.doc_root / "api" / "acme.rst"].content
+    assert module_rst.splitlines()[:2] == ["acme", "===="]
+    assert ".. automodule:: acme" in module_rst
+
+
+# --- index.rst: diataxis sections ------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("dirname", "toctree_entry"),
+    ("entry", "toctree_entry"),
     [
-        ("tutorials", "tutorials"),
-        ("how-to-guides", "how-to-guides"),
-        ("explanations", "explanations"),
-        ("concepts", "concepts"),
+        ("tutorials/", "tutorials"),
+        ("how-to-guides/", "how-to-guides"),
+        ("user-guides/", "user-guides"),
+        ("explanations/", "explanations"),
+        ("concepts/", "concepts"),
+        ("concept.rst", "concept"),
+        ("user-guide.md", "user-guide"),
     ],
 )
-def test_write_rst_files_includes_diataxis_sections_when_present(
-    tmp_path: Path, dirname, toctree_entry
+def test_generate_index_includes_diataxis_section_when_present(
+    tmp_path: Path, entry, toctree_entry
 ):
     make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-    (doc.doc_root / dirname).mkdir()
+    target = tmp_path / "docs" / entry.rstrip("/")
+    if entry.endswith("/"):
+        target.mkdir(parents=True)
+    else:
+        write(target, "Content.\n")
 
-    doc.write_rst_files()
+    doc, tree = generate(tmp_path)
 
-    index = (doc.doc_root / "index.rst").read_text()
+    index = tree.files[doc.doc_root / "index.rst"].content
     assert f"   {toctree_entry}" in index
 
 
-def test_write_rst_files_omits_diataxis_sections_when_absent(tmp_path: Path):
+def test_generate_index_omits_diataxis_sections_when_absent(tmp_path: Path):
     make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
+    doc, tree = generate(tmp_path)
 
-    doc.write_rst_files()
-
-    index = (doc.doc_root / "index.rst").read_text()
-    for entry in ("tutorials", "how-to-guides", "explanations", "concepts"):
+    index = tree.files[doc.doc_root / "index.rst"].content
+    for entry in ("tutorial", "how-to-guide", "user-guide", "explanation", "concept"):
         assert f"   {entry}" not in index
 
 
-def test_write_rst_files_selects_rst_file_over_missing_directory(tmp_path: Path):
+# --- _readme.md ------------------------------------------------------------
+
+
+def readme_md(tmp_path: Path, readme: str | None) -> str:
     make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-    write(doc.doc_root / "concept.rst", "Concepts go here.\n")
-
-    doc.write_rst_files()
-
-    index = (doc.doc_root / "index.rst").read_text()
-    assert "   concept" in index
+    if readme is not None:
+        write(tmp_path / "README.md", readme)
+    doc, tree = generate(tmp_path)
+    assert tmp_path / "README.md" not in tree.files
+    return tree.files[doc.doc_root / "_readme.md"].content
 
 
-# ---------------------------------------------------------------------------
-# write_readme_md()
-# ---------------------------------------------------------------------------
+def test_generate_readme_placeholder_goes_to_docs_not_project_root(tmp_path: Path):
+    """Regression: the placeholder used to be written to <root>/README.md."""
+    assert "acme" in readme_md(tmp_path, None)
 
 
-def test_write_readme_md_creates_placeholder_when_project_has_no_readme(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.write_readme_md()
-
-    readme = doc.root / "README.md"
-    assert readme.exists()
-    assert "acme" in readme.read_text()
-    # No source README existed, so nothing is copied into the docs tree.
-    assert not (doc.doc_root / "_readme.md").exists()
-
-
-def test_write_readme_md_strips_markdown_title_when_no_marker_present(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    write(
-        tmp_path / "README.md",
-        """\
-        # Acme
-
-        Acme does things.
-        """,
-    )
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.write_readme_md()
-
-    rendered = (doc.doc_root / "_readme.md").read_text()
-    assert not rendered.startswith("# Acme")
-    assert "Acme does things." in rendered
+@pytest.mark.parametrize(
+    ("readme", "expected"),
+    [
+        pytest.param(
+            "# Acme\n\nAcme does things.\n", "Acme does things.", id="atx-title"
+        ),
+        pytest.param(
+            "Acme\n====\n\nAcme does things.\n",
+            "Acme does things.",
+            id="setext-title",
+        ),
+        pytest.param(
+            "# Acme\n\nBadges and noise.\n\n<!-- doc0-start -->\n\nAcme does things.\n",
+            "\n\nAcme does things.\n",
+            id="doc0-start-marker",
+        ),
+        pytest.param(
+            "Just a plain paragraph, no title.\n",
+            "Just a plain paragraph, no title.",
+            id="no-title",
+        ),
+        pytest.param("", "", id="empty"),
+    ],
+)
+def test_generate_readme_extracts_body_from_project_readme(
+    tmp_path: Path, readme, expected
+):
+    assert readme_md(tmp_path, readme) == expected
 
 
-def test_write_readme_md_uses_content_after_doc0_start_marker(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    write(
-        tmp_path / "README.md",
-        """\
-        # Acme
-
-        Badges and other noise that should be excluded.
-
-        <!-- doc0-start -->
-
-        Acme does things.
-        """,
-    )
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.write_readme_md()
-
-    rendered = (doc.doc_root / "_readme.md").read_text()
-    assert "Badges and other noise" not in rendered
-    assert "Acme does things." in rendered
+def test_generate_readme_accepts_the_documented_doc_zero_start_marker(tmp_path: Path):
+    """The user guide documents ``<!-- doc-zero-start -->``; the code used to
+    accept only ``<!-- doc0-start -->``."""
+    readme = "# Acme\n\n[![PyPI](https://img.shields.io/pypi/v/acme)](x)\n\n<!-- doc-zero-start -->\nBody.\n"
+    assert readme_md(tmp_path, readme) == "\nBody.\n"
 
 
-def test_write_readme_md_leaves_non_title_content_untouched(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme")
-    write(tmp_path / "README.md", "Just a plain paragraph, no title.\n")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.write_readme_md()
-
-    rendered = (doc.doc_root / "_readme.md").read_text()
-    assert rendered == "Just a plain paragraph, no title."
+def test_generate_readme_marker_keeps_everything_after_it_verbatim(tmp_path: Path):
+    """Badges after the marker are the user's explicit choice: keep them."""
+    readme = "Noise.\n<!-- doc0-start -->\n![CI](https://img.shields.io/x)\nBody.\n"
+    assert readme_md(tmp_path, readme) == "\n![CI](https://img.shields.io/x)\nBody.\n"
 
 
-# ---------------------------------------------------------------------------
-# Conf generation via init()/build(): authors, LICENSE copyright, extensions
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("readme", "expected"),
+    [
+        pytest.param(
+            "Noise.\n<!-- doc-zero-start -->\nBody.\n<!-- doc-zero-end -->\nFooter.\n",
+            "\nBody.\n",
+            id="start-and-end-markers",
+        ),
+        pytest.param(
+            "Noise.\n<!--doc0-start-->\nBody.\n<!--doc0-end-->\nFooter.\n",
+            "\nBody.\n",
+            id="legacy-markers-without-spaces",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "![PyPI](https://img.shields.io/pypi/v/acme)\n"
+            "\n"
+            "Acme does things.\n"
+            "<!-- doc-zero-end -->\n"
+            "## Contributing\n",
+            "Acme does things.",
+            id="end-marker-only-applies-default-rules-to-the-rest",
+        ),
+        pytest.param(
+            "<!-- doc-zero-end -->\nNoise.\n<!-- doc-zero-start -->\nBody.\n",
+            "\nBody.\n",
+            id="end-marker-before-start-marker-is-ignored",
+        ),
+    ],
+)
+def test_generate_readme_end_marker_drops_everything_after_it(
+    tmp_path: Path, readme, expected
+):
+    assert readme_md(tmp_path, readme) == expected
+
+
+@pytest.mark.parametrize(
+    ("readme", "expected"),
+    [
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "[![PyPI](https://img.shields.io/pypi/v/acme.svg)](https://pypi.org/project/acme)\n"
+            "[![Docs](https://readthedocs.org/projects/acme/badge/?version=latest)](https://acme.rtfd.io)\n"
+            "[![CI](https://github.com/me/acme/actions/workflows/ci.yml/badge.svg)](https://github.com/me/acme/actions)\n"
+            "\n"
+            "Acme does things.\n",
+            "Acme does things.",
+            id="badge-lines-under-title",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "[![Coverage](https://coveralls.io/repos/github/me/acme/badge.svg?branch=main)](https://coveralls.io/x) "
+            "![codecov](https://codecov.io/gh/me/acme/graph/badge.svg) "
+            "![Downloads](https://static.pepy.tech/badge/acme)\n"
+            "\n"
+            "Acme does things.\n",
+            "Acme does things.",
+            id="several-badges-on-one-line",
+        ),
+        pytest.param(
+            "[![PyPI](https://badge.fury.io/py/acme.svg)](https://pypi.org/project/acme)\n"
+            "\n"
+            "# Acme\n"
+            "\n"
+            "Acme does things.\n",
+            "Acme does things.",
+            id="badges-above-title",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "[![PyPI][pypi-badge]][pypi-link]\n"
+            "\n"
+            "Acme does things. See [the docs][docs].\n"
+            "\n"
+            "[pypi-badge]: https://img.shields.io/pypi/v/acme\n"
+            "[pypi-link]: https://pypi.org/project/acme\n"
+            "[docs]: https://acme.rtfd.io\n",
+            "Acme does things. See [the docs][docs].\n\n[docs]: https://acme.rtfd.io",
+            id="reference-style-badges-and-their-definitions",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            '<a href="https://pypi.org/project/acme"><img src="https://img.shields.io/pypi/v/acme" alt="PyPI"></a>\n'
+            '<img src="https://img.shields.io/badge/license-MIT-blue">\n'
+            "\n"
+            "Acme does things.\n",
+            "Acme does things.",
+            id="html-badges",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "Acme does things.\n"
+            "\n"
+            "![Build status](https://img.shields.io/badge/build-passing-green)\n"
+            "\n"
+            "More text.\n",
+            "Acme does things.\n\nMore text.",
+            id="badge-line-later-in-document",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "Acme is ![stable](https://img.shields.io/badge/stable-yes-green) software.\n",
+            "Acme is ![stable](https://img.shields.io/badge/stable-yes-green) software.",
+            id="inline-badge-in-prose-is-kept",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "![Architecture](docs/_static/architecture.png)\n"
+            "[![Screenshot](https://example.com/shot.png)](https://example.com)\n",
+            "![Architecture](docs/_static/architecture.png)\n"
+            "[![Screenshot](https://example.com/shot.png)](https://example.com)",
+            id="non-badge-images-are-kept",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            '<img src="docs/logo.png" alt="Acme logo">\n'
+            "\n"
+            "Acme does things. ![PyPI][pypi]\n"
+            "\n"
+            "[pypi]: https://img.shields.io/pypi/v/acme\n",
+            '<img src="docs/logo.png" alt="Acme logo">\n\nAcme does things. ![PyPI][pypi]\n\n[pypi]: https://img.shields.io/pypi/v/acme',
+            id="non-badge-html-image-and-inline-reference-badge-are-kept",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "Acme does things.\n"
+            "\n"
+            "![PyPI][pypi]\n"
+            "\n"
+            "[pypi]: https://img.shields.io/pypi/v/acme\n",
+            "Acme does things.",
+            id="badge-definitions-at-end-of-file",
+        ),
+        pytest.param(
+            "# Acme\n"
+            "\n"
+            "```markdown\n"
+            "![PyPI](https://img.shields.io/pypi/v/acme)\n"
+            "```\n",
+            "```markdown\n![PyPI](https://img.shields.io/pypi/v/acme)\n```",
+            id="badges-inside-code-fences-are-kept",
+        ),
+    ],
+)
+def test_generate_readme_strips_known_badges_by_default(
+    tmp_path: Path, readme, expected
+):
+    assert readme_md(tmp_path, readme) == expected
+
+
+# --- conf.py ---------------------------------------------------------------
+
+
+def conf_py(tmp_path: Path, license: str | None = None, **toml_kwargs) -> str:
+    make_loadable_project(tmp_path, name="acme", **toml_kwargs)
+    if license is not None:
+        write(tmp_path / "LICENSE", license)
+    doc, tree = generate(tmp_path)
+    return tree.files[doc.doc_root / "conf.py"].content
 
 
 def test_conf_uses_first_author_name_and_email_from_pyproject(tmp_path: Path):
-    make_loadable_project(
-        tmp_path,
-        name="acme",
-        authors=[{"name": "Ada Lovelace", "email": "ada@example.com"}],
+    conf = conf_py(
+        tmp_path, authors=[{"name": "Ada Lovelace", "email": "ada@example.com"}]
     )
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.init()
-
-    conf = (doc.doc_root / "conf.py").read_text()
-    assert "Ada Lovelace <ada@example.com>" in conf
+    assert "author = 'Ada Lovelace <ada@example.com>'" in conf
 
 
 def test_conf_falls_back_to_unknown_author_without_pyproject_authors_or_license(
     tmp_path: Path,
 ):
-    make_loadable_project(tmp_path, name="acme", include_authors=False)
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.init()
-
-    conf = (doc.doc_root / "conf.py").read_text()
-    assert "unknown author" in conf
+    conf = conf_py(tmp_path, include_authors=False)
+    assert "copyright = 'unknown author'" in conf
 
 
 def test_conf_reads_year_and_author_from_license_copyright_notice(tmp_path: Path):
-    make_loadable_project(tmp_path, name="acme", include_authors=False)
-    write(
-        tmp_path / "LICENSE",
-        "Copyright (c) 2019, Grace Hopper\n\nAll rights reserved.\n",
+    conf = conf_py(
+        tmp_path,
+        license="Copyright (c) 2019, Grace Hopper\n\nAll rights reserved.\n",
+        include_authors=False,
     )
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.init()
-
-    conf = (doc.doc_root / "conf.py").read_text()
     assert "copyright = '2019, Grace Hopper'" in conf
 
 
 def test_conf_pyproject_author_takes_precedence_over_license_author(tmp_path: Path):
-    make_loadable_project(
+    conf = conf_py(
         tmp_path,
-        name="acme",
+        license="Copyright (c) 2019, Grace Hopper\n",
         authors=[{"name": "Ada Lovelace"}],
     )
-    write(tmp_path / "LICENSE", "Copyright (c) 2019, Grace Hopper\n")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-
-    doc.init()
-
-    conf = (doc.doc_root / "conf.py").read_text()
     assert "author = 'Ada Lovelace'" in conf
-    assert "2019, Ada Lovelace" in conf
+    assert "copyright = '2019, Ada Lovelace'" in conf
 
 
-def test_init_raises_when_license_exists_but_has_no_recognizable_copyright(
+def test_conf_ignores_license_without_a_recognizable_copyright_notice(
     tmp_path: Path,
 ):
-    make_loadable_project(tmp_path, name="acme", include_authors=False)
-    write(tmp_path / "LICENSE", "This software is provided as-is.\n")
-    doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
-    doc.init()  # init without license
-
-    conf = (doc.doc_root / "conf.py").read_text()
-    print(conf)
+    """
+    A LICENSE with no "Copyright <year>" line is not an error: the year is
+    simply omitted and the author falls back like when there is no LICENSE.
+    """
+    conf = conf_py(
+        tmp_path, license="This software is provided as-is.\n", include_authors=False
+    )
     assert "copyright = 'unknown author'" in conf
 
 
-def test_conf_includes_default_sphinx_extensions(tmp_path: Path):
+def test_conf_includes_default_sphinx_extensions_and_theme(tmp_path: Path):
+    conf = conf_py(tmp_path)
+    assert "extensions = ['sphinx.ext.autodoc', 'sphinx_mdinclude']" in conf
+    assert "html_theme = 'alabaster'" in conf
+
+
+# ---------------------------------------------------------------------------
+# init(): writing the tree
+# ---------------------------------------------------------------------------
+
+
+def test_init_writes_the_generated_tree(tmp_path: Path):
     make_loadable_project(tmp_path, name="acme")
     doc = Doc0.load(tmp_path)
-    doc.doc_root.mkdir(parents=True)
+    tree = doc.generate()
 
     doc.init()
 
-    conf = (doc.doc_root / "conf.py").read_text()
-    assert "sphinx.ext.autodoc" in conf
-    assert "sphinx_mdinclude" in conf
+    for path, file in tree.files.items():
+        assert path.read_text() == file.content, path
+    assert (doc.doc_root / "_static").is_dir()
+
+
+def test_init_overwrites_owned_files_but_keeps_user_owned_ones(tmp_path: Path):
+    make_loadable_project(tmp_path, name="acme")
+    doc = Doc0.load(tmp_path)
+    write(doc.doc_root / "conf.py", "# stale\n")
+    write(doc.doc_root / "index.rst", "stale\n")
+    write(doc.doc_root / "requirements.txt", "my-requirements\n")
+    write(tmp_path / ".readthedocs.yml", "# my rtd config\n")
+
+    doc.init()
+
+    assert "project = 'acme'" in (doc.doc_root / "conf.py").read_text()
+    assert "Welcome to the acme" in (doc.doc_root / "index.rst").read_text()
+    assert (doc.doc_root / "requirements.txt").read_text() == "my-requirements\n"
+    assert (tmp_path / ".readthedocs.yml").read_text() == "# my rtd config\n"
+
+
+def test_init_removes_stale_api_pages(tmp_path: Path):
+    make_loadable_project(tmp_path, name="acme")
+    doc = Doc0.load(tmp_path)
+    write(doc.doc_root / "api" / "removed_module.rst", "stale\n")
+
+    doc.init()
+
+    assert sorted(p.name for p in (doc.doc_root / "api").iterdir()) == [
+        "_index.rst",
+        "acme.rst",
+    ]
+
+
+def test_init_with_custom_docs_dir_writes_only_there(tmp_path: Path):
+    """Regression for requirements.txt landing in docs/ and README.md at the root."""
+    make_loadable_project(tmp_path, name="acme")
+    doc = Doc0.load(tmp_path, docs="site")
+
+    doc.init()
+
+    site = tmp_path / "site"
+    assert (site / "requirements.txt").is_file()
+    assert (site / "_readme.md").is_file()
+    assert (site / "_static").is_dir()
+    assert not (tmp_path / "docs").exists()
+    assert not (tmp_path / "README.md").exists()
 
 
 # ---------------------------------------------------------------------------

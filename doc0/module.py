@@ -3,11 +3,14 @@ from __future__ import annotations
 import inspect
 import sys
 from dataclasses import dataclass
+from logging import getLogger
 from pathlib import Path
 from types import ModuleType
-from typing import Iterator
+from typing import Iterable, Iterator
 
 from .exports import Section, parse_export_sections
+
+log = getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -75,21 +78,44 @@ class ModuleSpec:
 
     def iter_submodules(self, skip_private: bool = False) -> Iterator[ModuleSpec]:
         """
-        Iterate over all sub-modules in the project.
+        Iterate over all sub-modules under this package, depth-first, in
+        deterministic order (directory entries sorted by name -- not
+        ``Path.iterdir()`` order).
+
+        A package directory yields itself, then its contents, before the
+        walk moves on to its next sibling. A directory without
+        ``__init__.py`` is a namespace package: it is not yielded itself,
+        but is still recursed into. Only ``.py`` files are yielded.
+
+        ``__init__.py`` is never yielded as a pseudo-submodule of its own
+        package. Entries whose module name segment is not a valid Python
+        identifier (e.g. ``static-files/``, ``my-script.py``) are skipped
+        and, for directories, not recursed into -- they can't be imported
+        by that dotted name. When ``skip_private`` is set, ``_``-prefixed
+        files and directories are skipped the same way.
         """
-        if self.is_package:
-            for path in self.path.iterdir():
-                if skip_private and path.name.startswith("_"):
-                    continue
+        if not self.is_package:
+            return
 
-                if path.is_dir():
-                    spec = ModuleSpec(name=f"{self.name}.{path.name}", path=path)
-                    if (path / "__init__.py").exists():
-                        yield spec
-                    yield from spec.iter_submodules(skip_private=skip_private)
+        for path in sorted(self.path.iterdir(), key=lambda p: p.name):
+            if path.name == "__init__.py":
+                continue
 
-                elif path.suffix == ".py":
-                    yield ModuleSpec(name=f"{self.name}.{path.stem}", path=path)
+            stem = path.stem if path.suffix == ".py" else path.name
+            if not stem.isidentifier():
+                continue
+
+            if skip_private and stem.startswith("_"):
+                continue
+
+            if path.is_dir():
+                spec = ModuleSpec(name=f"{self.name}.{path.name}", path=path)
+                if (path / "__init__.py").exists():
+                    yield spec
+                yield from spec.iter_submodules(skip_private=skip_private)
+
+            elif path.suffix == ".py":
+                yield ModuleSpec(name=f"{self.name}.{path.stem}", path=path)
 
 
 @dataclass
@@ -180,3 +206,51 @@ class Module:
             yield f".. autofunction:: {qualname}"
         else:
             yield f".. autodata:: {qualname}"
+
+
+def find_public_modules(roots: Iterable[ModuleSpec]) -> list[Module]:
+    """
+    Load and return the public modules of a project, in documentation
+    order: every root module, in the given order (always included,
+    regardless of docstring, never warned about), followed by each root's
+    public submodules -- in the given root order, then in
+    ``iter_submodules(skip_private=True)`` order.
+
+    A submodule with no docstring is skipped (logged at DEBUG). Submodules
+    with no, or an empty, ``__all__`` are still included, but logged at
+    WARNING.
+
+    Import errors propagate with their original type, with a note
+    attached naming the dotted module name and its source path.
+    """
+    roots = list(roots)
+    public_modules = [_load_module(root) for root in roots]
+
+    for root in roots:
+        for sub_module in root.iter_submodules(skip_private=True):
+            mod = _load_module(sub_module)
+            if mod.docstring is None:
+                log.debug("Skipping module %s: no docstring", sub_module.name)
+                continue
+
+            if mod.exports is None:
+                log.warning("Module %s has no __all__ attribute", sub_module.name)
+            elif not mod.exports:
+                log.warning("Module %s do not export any symbols", sub_module.name)
+
+            public_modules.append(mod)
+
+    return public_modules
+
+
+def _load_module(spec: ModuleSpec) -> Module:
+    """
+    Load ``spec``, attaching a note identifying the dotted module name and
+    its source path to any exception raised during import, then
+    re-raising it unchanged.
+    """
+    try:
+        return spec.load_module()
+    except Exception as exc:
+        exc.add_note(f"doc0: while importing module {spec.name!r} from {spec.source_path}")
+        raise

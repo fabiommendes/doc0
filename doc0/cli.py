@@ -10,7 +10,7 @@ from typing import Annotated, Any
 import typer
 
 from .base import Doc0
-from .util import maybe_map, validate_theme
+from .theme import ThemeError
 
 __all__ = [
     "main",
@@ -26,6 +26,29 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+#: The `--theme` option shared by `build` and `serve`. Validation happens in
+#: `Doc0.load` (via `doc0.theme.resolve_theme`), not here, so an invalid
+#: value -- from the flag or from pyproject.toml -- is reported the same way.
+ThemeOption = Annotated[str | None, typer.Option("--theme", help="Select the Sphinx theme")]
+
+
+def _load(theme: str | None) -> Doc0:
+    """
+    Load the current project, converting an invalid theme into a clean
+    CLI usage error (exit code 2, no traceback) instead of a bare
+    ValueError.
+
+    ``typer.BadParameter`` is used rather than ``click.UsageError``: this
+    typer version vendors its own click fork internally (``typer._click``)
+    and only recognizes exceptions from that fork, not from the standalone
+    ``click`` package. ``typer.BadParameter`` is a public re-export of that
+    fork's ``UsageError`` subclass, so it's caught the same way.
+    """
+    try:
+        return Doc0.load(Path.cwd(), theme=theme)
+    except ThemeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
 
 @app.command()
 def test() -> None:
@@ -37,40 +60,20 @@ def test() -> None:
 
 
 @app.command()
-def build(
-    theme: Annotated[
-        str | None,
-        typer.Option(
-            ...,
-            "--theme",
-            help="Select the Sphinx theme",
-            callback=maybe_map(validate_theme),
-        ),
-    ] = None,
-) -> None:
+def build(theme: ThemeOption = None) -> None:
     """
     Build the documentation for the current project.
     """
-    doc = Doc0.load(Path.cwd(), theme=theme)
+    doc = _load(theme)
     doc.build()
 
 
 @app.command()
-def serve(
-    theme: Annotated[
-        str | None,
-        typer.Option(
-            ...,
-            "--theme",
-            help="Select the Sphinx theme",
-            callback=maybe_map(validate_theme),
-        ),
-    ] = None,
-) -> None:
+def serve(theme: ThemeOption = None) -> None:
     """
     Serve the documentation in the live server.
     """
-    doc = Doc0.load(Path.cwd(), theme=theme)
+    doc = _load(theme)
     doc.serve()
 
 

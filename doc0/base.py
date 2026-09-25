@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import re
-import shutil
 from dataclasses import dataclass, field
 from importlib.metadata import version as module_version
-from logging import getLogger
 from pathlib import Path
 from typing import Any, Iterable, Iterator, TypedDict
 
-from .module import Module
+from .module import Module, find_public_modules
 from .pyproject import PyProject
+from .readme import readme_body
+from .theme import resolve_theme
+from .tree import DocFile, DocTree, WritePolicy
 from .util import first_existing
 
 type ModuleName = str
@@ -23,11 +24,10 @@ DEFAULT_EXTENSIONS = [
     "sphinx_mdinclude",
     # "myst_parser",
 ]
-SPHINX_THEME_ALIASES = {
-    "rtd": "sphinx_rtd_theme",
-    "readthedocs": "sphinx_rtd_theme",
-    "default": "alabaster",
-}
+README_PLACEHOLDER = (
+    "This is the documentation for {name}. "
+    "Please include a README.md file in the documentation root directory."
+)
 READTHEDOCS_TEMPLATE = """
 # Read the Docs configuration file
 # See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
@@ -41,19 +41,17 @@ build:
   tools:
     python: "3.13"
 
-# Build documentation in the "docs/" directory with Sphinx
+# Build documentation in the "{docs}/" directory with Sphinx
 sphinx:
-  configuration: docs/conf.py
+  configuration: {docs}/conf.py
 
 # Optionally, but recommended,
 # declare the Python requirements required to build your documentation
 # See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
 python:
   install:
-    - requirements: docs/requirements.txt
+    - requirements: {docs}/requirements.txt
 """
-
-log = getLogger(__name__)
 
 
 @dataclass
@@ -68,7 +66,7 @@ class Doc0:
     #: Base location for the documentation assets
     doc_root: Path
 
-    #: The theme to use for the documentation.
+    #: The resolved Sphinx theme name to use for the documentation.
     theme: str
 
     @classmethod
@@ -82,17 +80,19 @@ class Doc0:
     ) -> Doc0:
         """
         Load project in the given path.
+
+        ``theme`` is the CLI-provided value, if any; the final theme is
+        resolved via ``doc0.theme.resolve_theme`` (CLI value, else
+        ``[tool.doc-zero] theme`` in pyproject.toml, else the default).
         """
         root = root or Path.cwd()
         pyproject = PyProject(root=root)
-
-        if theme is None:
-            theme = pyproject.get("tool.doc-zero.theme", default="default", type=str)
+        resolved_theme = resolve_theme(theme, pyproject)
 
         return Doc0(
             doc_root=root / docs,
             pyproject=pyproject,
-            theme=theme,
+            theme=resolved_theme,
         )
 
     @property
@@ -104,31 +104,55 @@ class Doc0:
 
     def init(self) -> None:
         """
-        Assure that the documentation is initialized.
-
-        Call .generate() if the documentation is not initialized.
+        Generate the documentation content and write it to disk.
         """
-        self.doc_root.mkdir(parents=True, exist_ok=True)
-        (self.doc_root / "_static").mkdir(exist_ok=True)
+        self.generate().write()
 
-        # Write/overwrite docs/conf.py.
-        conf_path = self.doc_root / "conf.py"
-        conf = Conf.from_pyproject(self.pyproject, theme=self.theme)
-        conf_path.write_text(conf.render())
+    def generate(self) -> DocTree:
+        """
+        Compute the documentation tree as data, without writing anything to
+        disk (no directory is created, no file is read except the project's
+        inputs: pyproject.toml, README.md, LICENSE, and the source modules).
+        """
+        pyproject = self.pyproject
+        root = self.root
+        doc_root = self.doc_root
 
-        # Write docs/index.rst and docs/api/*
-        self.write_rst_files()
-        self.write_readme_md()
+        public_modules = find_public_modules(pyproject.find_root_modules())
 
-        # Write the Read the Docs configuration file, if it doesn't exist.
-        rtd_path = self.root / ".readthedocs.yml"
-        if not rtd_path.exists():
-            rtd_path.write_text(READTHEDOCS_TEMPLATE)
+        conf = Conf.from_pyproject(pyproject, theme=self.theme, license_text=_read_license(root))
+        index = Index(
+            name=pyproject.name,
+            tutorials=_select_diataxis_entry(doc_root, "tutorial"),
+            how_to_guides=_select_diataxis_entry(doc_root, "how-to-guide"),
+            user_guides=_select_diataxis_entry(doc_root, "user-guide"),
+            explanations=_select_diataxis_entry(doc_root, "explanation"),
+            concepts=_select_diataxis_entry(doc_root, "concept"),
+            api_modules=[module.name for module in public_modules],
+        )
 
-        # Write the requirements.txt file for Read the Docs, if it doesn't exist.
-        req_path = self.root / "docs" / "requirements.txt"
-        if not req_path.exists():
-            req_path.write_text(f"doc-zero>={module_version('doc-zero')}")
+        files: dict[Path, DocFile] = {
+            doc_root / "conf.py": DocFile(conf.render()),
+            doc_root / "index.rst": DocFile(index.render()),
+            doc_root / "_readme.md": DocFile(_readme_content(root, pyproject.name)),
+            doc_root / "api" / "_index.rst": DocFile(render_modules_index(public_modules)),
+        }
+        for module in public_modules:
+            files[doc_root / "api" / f"{module.name}.rst"] = DocFile(module.render())
+
+        docs_rel = doc_root.relative_to(root).as_posix()
+        files[doc_root / "requirements.txt"] = DocFile(
+            f"doc-zero>={module_version('doc-zero')}", policy=WritePolicy.IF_MISSING
+        )
+        files[root / ".readthedocs.yml"] = DocFile(
+            READTHEDOCS_TEMPLATE.format(docs=docs_rel), policy=WritePolicy.IF_MISSING
+        )
+
+        return DocTree(
+            files=files,
+            dirs=[doc_root / "_static"],
+            owned_dirs=[doc_root / "api"],
+        )
 
     def build(self) -> None:
         """
@@ -153,70 +177,6 @@ class Doc0:
         Execute all doctests.
         """
 
-    #
-    # Write parts of the documentation
-    #
-    def write_rst_files(self) -> None:
-        """
-        Write the index, API docs and process the User guide.
-        """
-        self.doc_root.mkdir(parents=True, exist_ok=True)
-        roots = list(self.pyproject.find_root_modules())
-        public_modules = [root.load_module() for root in roots]
-
-        for root in roots:
-            for sub_module in root.iter_submodules(skip_private=True):
-                mod = sub_module.load_module()
-                docstring = mod.docstring
-                if docstring is None:
-                    continue
-
-                if mod.exports is None:
-                    msg = "Module %s has no __all__ attribute" % sub_module.name
-                    log.warning(msg)
-                elif not mod.exports:
-                    msg = "Module %s do not export any symbols" % sub_module.name
-                    log.warning(msg)
-
-                public_modules.append(mod)
-
-        index = Index.load(self.pyproject.name, self.doc_root, public_modules)
-        index_path = self.doc_root / "index.rst"
-        index_path.write_text(index.render())
-
-        # Clean the docs/api directory
-        api_dir = self.doc_root / "api"
-        if api_dir.exists():
-            shutil.rmtree(api_dir)
-        api_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create the API documentation for each public module and the index.rst file.
-        for module in public_modules:
-            module_path = self.doc_root / "api" / f"{module.name}.rst"
-            module_path.write_text(module.render())
-        (self.doc_root / "api" / "_index.rst").write_text(
-            render_modules_index(public_modules)
-        )
-
-    def write_readme_md(self) -> None:
-        """
-        Write the README.md file for the documentation.
-        """
-        readme_path = self.root / "README.md"
-        if not readme_path.exists():
-            src = f"This is the documentation for {self.pyproject.name}. Please include a README.md file in the documentation root directory."
-            readme_path.write_text(src)
-            return
-
-        src = readme_path.read_text()
-        parts = re.split(r"<!--\s*doc0-start\s*-->", src, maxsplit=1)
-        if len(parts) == 1:
-            src = remove_md_title(src)
-        else:
-            src = parts[1]
-
-        (self.doc_root / "_readme.md").write_text(src)
-
 
 @dataclass
 class Index:
@@ -235,46 +195,6 @@ class Index:
     # Reference is concepts + api documentation
     concepts: Path | None = None
     api_modules: list[str] = field(default_factory=list)
-
-    @staticmethod
-    def load(name: str, root: Path, modules: Iterable[Module]):
-        """
-        Load the index.rst configuration from the given root path and modules.
-
-        It will search the root path for the tutorials, how-to guides and
-        explanations directories in order to fill-in the appropriate fields.
-        """
-
-        module_names = [mod.name for mod in modules]
-
-        def select(name: str, plural: str | None = None) -> Path | None:
-            """
-            Select the first existing path for the given name.
-            """
-            plural = plural or name + "s"
-            return first_existing(
-                [
-                    root / plural,
-                    root / f"{name}.rst",
-                    root / f"{name}.md",
-                ]
-            )
-
-        tutorials = select("tutorial")
-        how_to_guides = select("how-to-guide")
-        user_guides = select("user-guide")
-        explanations = select("explanation")
-        concepts = select("concept")
-
-        return Index(
-            name=name,
-            tutorials=tutorials,
-            how_to_guides=how_to_guides,
-            explanations=explanations,
-            user_guides=user_guides,
-            concepts=concepts,
-            api_modules=module_names,
-        )
 
     def render(self) -> str:
         """
@@ -323,7 +243,6 @@ class Conf:
     year: int | None = None
     extensions: list[str] = field(default_factory=DEFAULT_EXTENSIONS.copy)
     theme: str = "default"
-    extra_options: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
     def from_pyproject(
@@ -331,46 +250,48 @@ class Conf:
         /,
         *,
         theme: str,
-        author: str | None = None,
-        email: str | None = None,
-        year: int | None = None,
-        extensions: Iterable[str] = DEFAULT_EXTENSIONS,
-        root: Path | None = None,
+        license_text: str | None = None,
     ) -> Conf:
         """
-        Create Conf object from a PyProject object.
+        Create a Conf object from a PyProject object and (optionally) the
+        text of the project's LICENSE file.
+
+        The first pyproject author's name/email are used, if any. The year
+        and, absent a pyproject author, the author name are taken from the
+        LICENSE's copyright notice, if one can be found. A LICENSE without a
+        recognizable copyright notice is not an error: the year is simply
+        omitted and the author falls back to "unknown author" at render
+        time.
         """
         project = pyproject.name
-        extensions = list(extensions or [])
-        root = root or pyproject.root
+        author: str | None = None
+        email: str | None = None
+        year: int | None = None
 
         # Extract author information from the pyproject.toml file
         try:
             author_data = pyproject.authors[0]
-            author = author or author_data["name"]
-            if not email:
-                email = author_data.get("email")
+            author = author_data["name"]
+            email = author_data.get("email")
         except (TypeError, IndexError):  # empty authors list or invalid data
             pass
 
-        # Read the year from the Copyright notice in the LICENSE file.
-        if (licence_file := Path(root / "LICENSE")).exists():
-            copyright = None
-            if year is None:
-                try:
-                    copyright = find_copyright(licence_file.read_text())
-                    year = int(copyright["year"])
-                except ValueError:
-                    pass
-            if author is None and copyright is not None:
-                author = copyright["author"]
+        # Read the year (and, absent a pyproject author, the author) from
+        # the Copyright notice in the LICENSE file.
+        if license_text is not None:
+            try:
+                copyright = find_copyright(license_text)
+                year = int(copyright["year"])
+                if author is None:
+                    author = copyright["author"]
+            except ValueError:
+                pass
 
         return Conf(
             project=project,
             author=author,
             email=email,
             year=year,
-            extensions=extensions,
             theme=theme,
         )
 
@@ -378,7 +299,6 @@ class Conf:
         return "\n".join(self._iter_lines())
 
     def _iter_lines(self) -> Iterator[str]:
-        theme = SPHINX_THEME_ALIASES.get(self.theme, self.theme)
         copyright = f"{self.year}, " if self.year else ""
         copyright += self.author or "unknown author"
         author = self.author or "unknown author"
@@ -390,11 +310,9 @@ class Conf:
         yield f"author = {author!r}"
         yield f"extensions = {self.extensions!r}"
         yield "templates_path = ['_templates']"
-        yield f"html_theme = {theme!r}"
+        yield f"html_theme = {self.theme!r}"
         yield "html_static_path = ['_static']"
         yield "exclude_patterns = ['_readme.md', 'requirements.txt']"
-        for key, value in sorted(self.extra_options.items()):
-            yield f"{key} = {value!r}"
 
 
 class Copyright(TypedDict):
@@ -433,19 +351,40 @@ def render_modules_index(modules: Iterable[Module]) -> str:
     return "\n".join(lines)
 
 
-def remove_md_title(src: str) -> str:
+def _select_diataxis_entry(doc_root: Path, name: str, plural: str | None = None) -> Path | None:
     """
-    Remove the title from the given markdown source code.
+    Select the first existing diataxis entry for ``name`` under
+    ``doc_root``: the plural directory, then ``<name>.rst``, then
+    ``<name>.md``.
     """
-    lines = src.splitlines()
-    if not lines:
-        return src
+    plural = plural or f"{name}s"
+    return first_existing(
+        [
+            doc_root / plural,
+            doc_root / f"{name}.rst",
+            doc_root / f"{name}.md",
+        ]
+    )
 
-    # Remove the first line if it is a title
-    if lines[0].startswith("#"):
-        lines.pop(0)
-        # Remove the second line if it is a title underline
-        if lines and re.match(r"^=+$", lines[0]):
-            lines.pop(0)
 
-    return "\n".join(lines).lstrip("\n")
+def _read_license(root: Path) -> str | None:
+    """
+    Return the text of ``<root>/LICENSE``, or None if it doesn't exist.
+    """
+    license_path = root / "LICENSE"
+    if license_path.exists():
+        return license_path.read_text()
+    return None
+
+
+def _readme_content(root: Path, project_name: str) -> str:
+    """
+    Compute the content of ``_readme.md`` from ``<root>/README.md``.
+
+    If the README is missing, a placeholder mentioning the project name is
+    used. Otherwise, see ``readme_body`` for what is kept.
+    """
+    readme_path = root / "README.md"
+    if not readme_path.exists():
+        return README_PLACEHOLDER.format(name=project_name)
+    return readme_body(readme_path.read_text())

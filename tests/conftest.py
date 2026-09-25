@@ -3,8 +3,10 @@ Shared scenario builders for the doc0 test harness.
 
 These tests exercise doc0 exclusively through its public API:
 
-* ``doc0.Doc0``    -- the toplevel entry point (``load``, ``init``, ``build``,
-  ``serve``, ``test``, ``write_rst_files``, ``write_readme_md``)
+* ``doc0.Doc0``    -- the toplevel entry point (``load``, ``generate``,
+  ``init``, ``build``, ``serve``, ``test``); ``generate()`` returns the doc
+  tree as data (``doc0.tree.DocTree``), so most scenarios assert on that
+  and only a few exercise the writer through ``init()``
 * ``doc0.PyProject`` -- project introspection (``get``, ``__getitem__``,
   properties, ``find_root_modules``)
 * ``doc0.Module`` / ``doc0.module.ModuleSpec`` -- module loading/rendering
@@ -57,7 +59,7 @@ def make_pyproject_toml(
 ) -> Path:
     """
     Write a pyproject.toml file with configurable knobs so that we can drive
-    every branch of PyProject.find_root_modules() and Conf.from_pyproject().
+    every branch of PyProject.find_root_modules() and conf.py generation.
     """
     lines = ["[project]", f'name = "{name}"', f'version = "{version}"', f'description = "{description}"']
 

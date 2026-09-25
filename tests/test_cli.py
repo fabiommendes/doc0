@@ -12,7 +12,7 @@ public entry point, is responsible for.
 from __future__ import annotations
 
 import pytest
-from conftest import make_pyproject_toml
+from conftest import make_module_file, make_pyproject_toml
 from typer.testing import CliRunner
 
 from doc0 import Doc0
@@ -112,3 +112,69 @@ def test_main_entry_point_runs_the_app(project, record_calls, monkeypatch):
 
     assert excinfo.value.code in (0, None)
     assert record_calls == [("build", ())]
+
+
+# ---------------------------------------------------------------------------
+# --theme end to end: CLI flag + pyproject -> conf.py, via a real build/serve
+# (Sphinx itself stubbed by fake_sphinx)
+# ---------------------------------------------------------------------------
+
+
+def themed_project(root, pyproject_theme):
+    extra = ""
+    if pyproject_theme is not None:
+        extra = f'\n[tool.doc-zero]\ntheme = "{pyproject_theme}"\n'
+    make_pyproject_toml(
+        root, name="acme", build_backend="uv_build", module_name="acme", extra_toml=extra
+    )
+    make_module_file(root / "acme.py", docstring="Acme.", all_=[])
+
+
+@pytest.mark.parametrize("command", ["build", "serve"])
+@pytest.mark.parametrize(
+    ("flag", "pyproject_theme", "expected"),
+    [
+        pytest.param(None, None, "alabaster", id="default"),
+        pytest.param(None, "rtd", "sphinx_rtd_theme", id="pyproject-alias"),
+        pytest.param("furo", "rtd", "furo", id="flag-wins"),
+        pytest.param("readthedocs", None, "sphinx_rtd_theme", id="flag-alias"),
+    ],
+)
+def test_theme_reaches_conf_py(
+    tmp_path, monkeypatch, fake_sphinx, command, flag, pyproject_theme, expected
+):
+    themed_project(tmp_path, pyproject_theme)
+    monkeypatch.chdir(tmp_path)
+    args = [command] + ([] if flag is None else ["--theme", flag])
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    conf = (tmp_path / "docs" / "conf.py").read_text()
+    assert f"html_theme = {expected!r}" in conf
+    assert len(fake_sphinx[command].calls) == 1
+
+
+@pytest.mark.parametrize("command", ["build", "serve"])
+@pytest.mark.parametrize(
+    ("flag", "pyproject_theme", "source"),
+    [
+        pytest.param("bad theme", None, "--theme", id="invalid-flag"),
+        pytest.param(None, "bad theme", "tool.doc-zero", id="invalid-pyproject"),
+    ],
+)
+def test_invalid_theme_is_a_clean_usage_error_naming_its_source(
+    tmp_path, monkeypatch, fake_sphinx, command, flag, pyproject_theme, source
+):
+    themed_project(tmp_path, pyproject_theme)
+    monkeypatch.chdir(tmp_path)
+    args = [command] + ([] if flag is None else ["--theme", flag])
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 2
+    assert isinstance(result.exception, SystemExit)  # no traceback
+    assert "'bad theme'" in result.output
+    assert source in result.output
+    assert not fake_sphinx[command].calls
+    assert not (tmp_path / "docs").exists()

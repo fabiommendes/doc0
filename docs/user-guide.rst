@@ -108,17 +108,26 @@ The README
 ~~~~~~~~~~
 
 Your project's front page comes from ``README.md`` (mind the .md extension!). 
-Since the README often have some reduntant content for the docs (e.g., the main
-title, badges, GitHub-specific pitch), doc-zero supports two modes of operation:
+Since the README often has content that is redundant in the docs (e.g., the
+main title, badges, a GitHub-specific pitch), doc-zero supports two modes of
+operation:
 
-- **Default.** doc-zero strips a leading Markdown title and uses the rest 
-  verbatim.
-- **With a marker.** If ``README.md`` contains an HTML comment
+- **Default.** doc-zero strips the leading Markdown title and any lines made
+  only of badges from known services (shields.io, PyPI, Read the Docs, GitHub
+  Actions, Coveralls, Codecov, etc.), and uses the rest verbatim. Badges in
+  the middle of a sentence or inside code blocks are kept.
+
+- **With a start marker.** If ``README.md`` contains an HTML comment
   ``<!-- doc-zero-start -->``, everything *before* the marker is dropped
-  (badges, a GitHub-only pitch, install one-liners aimed at scanners
-  of a repo listing) and everything *after* it is used verbatim. This
+  (badges, a GitHub-only pitch, install one-liners aimed at people
+  skimming a repo listing) and everything *after* it is used verbatim. This
   is the better option once your README has accumulated GitHub-specific
-  furniture you don't want in the generated docs.
+  content you don't want in the generated docs.
+
+In both modes, an ``<!-- doc-zero-end -->`` comment marks where the docs'
+copy of the README ends: the marker and everything after it (e.g., a
+contributing section or a license notice) are dropped. The shorter
+``<!-- doc0-start -->`` and ``<!-- doc0-end -->`` spellings also work.
 
 License, copyright, authors, and other metadata
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -268,9 +277,19 @@ doc-zero picks a Sphinx HTML theme using the first of these that's set:
       [tool.doc-zero]
       theme = "rtd"
 
+3. Otherwise, ``default``.
+
 It accepts any theme Sphinx can find, including third-party themes you install
-into your virtual environment. This is the only configuration option doc-zero 
-exposes.
+into your virtual environment. This is the only configuration option doc-zero
+exposes. A few built-in aliases are expanded to the real Sphinx theme name:
+
+- ``rtd`` and ``readthedocs`` → ``sphinx_rtd_theme``
+- ``default`` → ``alabaster``
+
+The value must look like a Python module name (e.g. ``furo`` or
+``sphinx_material.theme``). Anything else is rejected before any docs are
+generated, and the error says whether the bad value came from ``--theme``
+or from ``pyproject.toml``.
 
 CLI reference
 -------------
