@@ -68,3 +68,6 @@ following conditions:
 * The module defines a `__all__` variable that lists its public API.
 
 `doc-zero` only includes the public API in the generated documentation. 
+
+
+## Adding extra documentation
