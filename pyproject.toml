@@ -55,6 +55,10 @@ dev = ["ruff>=0.15.15", "pytest>=9.0.0", "pytest-cov>=7.0.0", "taskipy>=1.14.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# External corpus builds clone and install real projects: run them with
+# `pytest -m slow`.
+addopts = ["-m", "not slow"]
+markers = ["slow: clones and builds external projects (network, minutes)"]
 
 [tool.coverage.run]
 source = ["doc0"]

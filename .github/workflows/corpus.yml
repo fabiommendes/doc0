@@ -1,0 +1,33 @@
+# $schema=https://www.schemastore.org/github-workflow.json
+# Builds the external projects in tests/corpus/corpus.toml (pytest -m slow).
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+name: corpus
+
+jobs:
+  corpus:
+    name: external corpus
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Build external corpus projects
+        run: uv run pytest tests/test_corpus.py -m slow -v

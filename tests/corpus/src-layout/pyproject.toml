@@ -1,0 +1,8 @@
+[project]
+name = "acme-tools"
+version = "1.0.0"
+description = "uv_build with default settings."
+
+[build-system]
+requires = ["uv_build>=0.8"]
+build-backend = "uv_build"

@@ -1,0 +1,42 @@
+# Always-green corpus: projects doc0 must keep documenting.
+#
+# A project is green when the Sphinx build succeeds and every page listed
+# under `pages` exists and documents the listed objects. Objects are
+# checked by their Sphinx anchor (e.g. "pkg.Class"), so an empty page
+# doesn't count.
+#
+# [local.<dir>]: a project under tests/corpus/<dir>, built on every test
+#   run. `pages` is the exact set of API pages: a missing or extra page
+#   fails, since we control these projects.
+#
+# [external.<name>]: a real project, cloned from `git` at `ref` and built
+#   in its own virtualenv by the `slow` tests (`pytest -m slow`). `pages`
+#   is a subset: extra pages are fine, so upstream docs and API changes
+#   don't break the build. Optional `subdir` points at the project inside
+#   the repository, and `install` lists extra requirements.
+
+[local.mdq-like.pages]
+"api/mdq_like.html" = ["mdq_like.Question", "mdq_like.Diagnostic"]
+"api/mdq_like.models.html" = ["mdq_like.models.Question", "mdq_like.models.Choice"]
+"api/mdq_like.convert.html" = ["mdq_like.convert.Aiken"]
+"api/mdq_like.convert.aiken.html" = [
+    "mdq_like.convert.aiken.Aiken",
+    "mdq_like.convert.aiken.AikenQuestion",
+]
+
+[local.src-layout.pages]
+"api/acme_tools.html" = ["acme_tools.Widget", "acme_tools.make_widget"]
+"api/acme_tools.widgets.html" = ["acme_tools.widgets.Widget"]
+
+[local.flat-toplevel.pages]
+"api/flat_pkg.html" = ["flat_pkg.VERSION", "flat_pkg.greet"]
+
+[external.attrs]
+git = "https://github.com/python-attrs/attrs"
+ref = "26.1.0"
+
+[external.attrs.pages]
+"api/attr.html" = ["attr.asdict", "attr.attrib", "attr.Attribute"]
+"api/attrs.html" = ["attrs.asdict", "attrs.Attribute", "attrs.Converter"]
+"api/attr.validators.html" = ["attr.validators.instance_of", "attr.validators.optional"]
+"api/attr.converters.html" = ["attr.converters.optional", "attr.converters.pipe"]

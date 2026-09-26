@@ -1,0 +1,13 @@
+[project]
+name = "mdq-like"
+version = "0.1.0"
+description = "Shaped like mdq: relative imports and dataclasses."
+authors = [{ name = "Corpus Author" }]
+
+[build-system]
+requires = ["uv_build>=0.8"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "mdq_like"
+module-root = "."
