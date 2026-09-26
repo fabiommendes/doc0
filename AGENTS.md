@@ -103,6 +103,13 @@ short:
 - `Doc0.build()`/`serve()` import Sphinx/sphinx-autobuild lazily; the
   `fake_sphinx` fixture stubs those imports via `sys.modules` so tests don't
   need the real (heavy) dependencies installed.
+- The always-green corpus (`tests/test_corpus.py`, manifest in
+  `tests/corpus/corpus.toml`) runs real Sphinx builds. Local projects in
+  `tests/corpus/<name>/` build on every run and must produce exactly the
+  listed API pages. External projects are cloned and built in their own
+  virtualenv only with `pytest -m slow` (the `corpus` CI workflow); their
+  page list is a subset, so upstream changes don't break the build. When a
+  real project breaks doc0, add a local project with the same shape.
 - When a test reveals a real bug, prefer fixing the bug over adjusting the
   test to match broken behavior. If a fix is out of scope for the change at
   hand, write the test as an explicit characterization test with a
@@ -172,12 +179,10 @@ or fixed, so it stays a reliable map rather than stale trivia.
   layout, so a mixed-case package dir such as `Acme/` is not found. uv
   stub packages (`foo-stubs` -> `foo-stubs/`) are not handled, and a
   non-string `module-root` silently falls back to `"src"`.
-- Module loading (`ModuleSpec.load_module()`) reuses `sys.modules[name]`
-  when present and never registers what it loads. So (a) if a module of
-  the same name was already imported -- e.g. an installed copy of the
-  project, or doc0 documenting itself -- that copy is documented instead
-  of the source tree; and (b) a submodule using relative imports
-  (`from .util import x`) only loads if the project is importable some
-  other way (installed in the environment, as `uv sync` does); otherwise
-  generation aborts with `ModuleNotFoundError` (characterized in
-  `tests/test_module.py`).
+- Module loading (`ModuleSpec.load_module()`) imports modules normally
+  (`importlib.import_module`), after putting the directory that holds the
+  top-level package first on `sys.path`. A module already in `sys.modules`
+  is reused, so if a copy of the same name was imported before (e.g. doc0
+  documenting itself), that copy is documented instead of the source
+  tree. Tests rely on the autouse `isolated_imports` fixture in
+  `tests/conftest.py` to unload fixture packages between tests.

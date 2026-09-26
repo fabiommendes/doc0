@@ -154,14 +154,16 @@ class Doc0:
             owned_dirs=[doc_root / "api"],
         )
 
-    def build(self) -> None:
+    def build(self) -> int:
         """
         Build the documentation using sphinx.
+
+        Returns Sphinx's exit status: 0 on success.
         """
         from sphinx.cmd.build import main
 
         self.init()
-        main([str(self.doc_root), str(self.root / "dist" / "docs")])
+        return main([str(self.doc_root), str(self.root / "dist" / "docs")])
 
     def serve(self) -> None:
         """

@@ -108,53 +108,6 @@ def test_load_module_reuses_already_imported_module(tmp_path, monkeypatch):
     assert module.docstring == "cached"
 
 
-def test_load_module_raises_when_spec_from_file_location_returns_none(
-    tmp_path, monkeypatch
-):
-    """
-    load_module() also has a defensive check for the case where
-    importlib.util.spec_from_file_location() itself returns None. That
-    doesn't happen for a real file under normal use, so we drive it via
-    the documented importlib collaborator to exercise that branch of the
-    public method.
-    """
-    import importlib.util
-
-    module_file = make_module_file(tmp_path / "specless.py", docstring="x")
-    spec = ModuleSpec(name="specless", path=module_file)
-
-    monkeypatch.setattr(
-        importlib.util, "spec_from_file_location", lambda *a, **kw: None
-    )
-
-    with pytest.raises(ImportError, match="Cannot load module"):
-        spec.load_module()
-
-
-def test_load_module_raises_when_spec_has_no_loader(tmp_path, monkeypatch):
-    """
-    load_module() has a defensive check for the case where importlib hands
-    back a spec with no loader attached. That combination doesn't occur
-    for a plain file under normal use, so we drive it via the documented
-    importlib collaborator to exercise that branch of the public method.
-    """
-    import importlib.util
-
-    module_file = make_module_file(tmp_path / "loaderless.py", docstring="x")
-    spec = ModuleSpec(name="loaderless", path=module_file)
-
-    real_spec = importlib.util.spec_from_file_location(spec.name, spec.path)
-    assert real_spec is not None
-
-    real_spec.loader = None
-    monkeypatch.setattr(
-        importlib.util, "spec_from_file_location", lambda *a, **kw: real_spec
-    )
-
-    with pytest.raises(ImportError, match="Cannot load module"):
-        spec.load_module()
-
-
 def test_load_module_raises_for_invalid_source(tmp_path):
     module_file = make_module_file(
         tmp_path / "broken.py", body="this is not valid python !!!"
@@ -350,23 +303,51 @@ def test_find_public_modules_names_the_module_that_failed_to_import(tmp_path):
     assert str(broken) in notes
 
 
-def test_find_public_modules_relative_import_fails_when_project_is_not_importable(
+def test_find_public_modules_supports_relative_imports_in_uninstalled_project(
     tmp_path,
 ):
-    """
-    Characterization of a known limitation (see AGENTS.md "Known rough
-    edges"): load_module() never registers the loaded root package in
-    sys.modules, so a submodule doing ``from .util import X`` only works if
-    the project is importable by other means (e.g. installed in the
-    environment, which ``uv sync`` does for uv projects). Here it is not,
-    so the relative import fails.
-    """
-    pkg = make_package(tmp_path / "pm_rel", docstring="Root.")
+    """Regression: modules used to be executed without being registered in
+    sys.modules, so ``from .util import X`` failed unless the project was
+    installed."""
+    pkg = make_package(tmp_path / "pm_rel", docstring="Root.", body="from .util import X\n")
     make_module_file(pkg / "util.py", docstring="Util.", body="X = 1\n")
     make_module_file(pkg / "api.py", docstring="Api.", body="from .util import X\n")
 
-    with pytest.raises(ModuleNotFoundError, match="pm_rel"):
-        find_public_modules([ModuleSpec(name="pm_rel", path=pkg)])
+    modules = find_public_modules([ModuleSpec(name="pm_rel", path=pkg)])
+
+    assert [m.name for m in modules] == ["pm_rel", "pm_rel.api", "pm_rel.util"]
+    assert modules[1].module.X == 1
+
+
+def test_find_public_modules_loads_dataclasses_with_postponed_annotations(tmp_path):
+    """Regression (seen in mdq): ``@dataclass`` under ``from __future__ import
+    annotations`` looks its module up in sys.modules, which crashed when the
+    module was executed without being registered there."""
+    pkg = make_package(tmp_path / "pm_dc", docstring="Root.")
+    sub = make_package(pkg / "convert", docstring="Converters.")
+    make_module_file(
+        sub / "aiken.py",
+        docstring="Aiken.",
+        body=(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "from ..models import Question\n"
+            "\n"
+            "@dataclass\n"
+            "class AikenQuestion:\n"
+            "    stem: str\n"
+            "    question: Question | None = None\n"
+        ),
+    )
+    make_module_file(pkg / "models.py", docstring="Models.", body="class Question: ...\n")
+
+    modules = find_public_modules([ModuleSpec(name="pm_dc", path=pkg)])
+
+    by_name = {m.name: m.module for m in modules}
+    aiken = by_name["pm_dc.convert.aiken"]
+    assert aiken.AikenQuestion("stem").stem == "stem"
+    # One module object per name: the relative import sees the same models.
+    assert aiken.Question is by_name["pm_dc.models"].Question
 
 
 # ---------------------------------------------------------------------------

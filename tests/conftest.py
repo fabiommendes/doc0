@@ -25,6 +25,7 @@ import sys
 import textwrap
 from pathlib import Path
 from types import ModuleType
+from typing import Iterator
 
 import pytest
 
@@ -127,10 +128,44 @@ def make_package(
     *,
     docstring: str | None = "A test package.",
     all_: list[str] | None = _MISSING,
+    body: str = "",
 ) -> Path:
     """Create a package directory with an __init__.py."""
-    make_module_file(path / "__init__.py", docstring=docstring, all_=all_)
+    make_module_file(path / "__init__.py", docstring=docstring, all_=all_, body=body)
     return path
+
+
+@pytest.fixture(autouse=True)
+def isolated_imports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
+    """
+    Unload fixture packages and restore sys.path after each test.
+
+    doc0 imports the project's modules for real, so fixture packages that
+    reuse a name (``acme``, ``widgets``, ...) would otherwise leak between
+    tests. Only modules loaded from pytest's temporary directories are
+    unloaded: dropping lazily imported library modules (e.g. parts of rich)
+    would leave stale references behind.
+    """
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    base = str(tmp_path_factory.getbasetemp())
+    yield
+    # Collect first: reading a namespace package's __path__ looks up its
+    # parent in sys.modules, so deleting while scanning breaks.
+    stale = [
+        name
+        for name, module in list(sys.modules.items())
+        if any(str(loc).startswith(base) for loc in _module_locations(module))
+    ]
+    for name in stale:
+        sys.modules.pop(name, None)
+
+
+def _module_locations(module: ModuleType) -> list[str]:
+    locations = [getattr(module, "__file__", None) or ""]
+    locations += [str(loc) for loc in getattr(module, "__path__", None) or []]
+    return locations
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +178,12 @@ class Recorder:
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
+        #: Exit status the stub returns; set it to simulate a failed build.
+        self.returncode = 0
 
     def __call__(self, argv: list[str]) -> int:
         self.calls.append(list(argv))
-        return 0
+        return self.returncode
 
 
 def _install_fake_module(monkeypatch: pytest.MonkeyPatch, dotted: str, **attrs: object) -> ModuleType:

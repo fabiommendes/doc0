@@ -65,7 +65,8 @@ def build(theme: ThemeOption = None) -> None:
     Build the documentation for the current project.
     """
     doc = _load(theme)
-    doc.build()
+    if status := doc.build():
+        raise typer.Exit(status)
 
 
 @app.command()

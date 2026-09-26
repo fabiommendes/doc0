@@ -676,6 +676,18 @@ def test_build_initializes_docs_and_invokes_sphinx_with_expected_argv(
     assert not fake_sphinx["serve"].calls
 
 
+@pytest.mark.parametrize("returncode", [0, 2])
+def test_build_returns_the_sphinx_exit_status(
+    tmp_path: Path, fake_sphinx: dict[str, Recorder], returncode: int
+):
+    """Regression: build() used to drop Sphinx's exit status, so a failed
+    build still looked successful."""
+    make_loadable_project(tmp_path, name="acme")
+    fake_sphinx["build"].returncode = returncode
+
+    assert Doc0.load(tmp_path).build() == returncode
+
+
 def test_build_always_forces_conf_and_index_regeneration(tmp_path: Path, fake_sphinx):
     make_loadable_project(tmp_path, name="acme")
 

@@ -182,3 +182,14 @@ def test_invalid_theme_is_a_clean_usage_error_naming_its_source(
     assert source in output
     assert not fake_sphinx[command].calls
     assert not (tmp_path / "docs").exists()
+
+
+def test_build_exits_with_the_sphinx_exit_status(tmp_path, monkeypatch, fake_sphinx):
+    """Regression: `doc0 build` exited 0 even when Sphinx failed."""
+    themed_project(tmp_path, None)
+    monkeypatch.chdir(tmp_path)
+    fake_sphinx["build"].returncode = 2
+
+    result = runner.invoke(app, ["build"])
+
+    assert result.exit_code == 2

@@ -51,29 +51,22 @@ class ModuleSpec:
         """
         Load the module from the spec.
 
-        This executes the module code, if not already loaded.
+        The module is imported normally, by name, with the directory that
+        holds its top-level package put first on ``sys.path``. That way it
+        is registered in ``sys.modules`` like any other import, so relative
+        imports, dataclasses and anything else that looks a module up by
+        name work, and Sphinx's autodoc later sees the same module objects.
+        A module already in ``sys.modules`` is reused as is.
         """
-        import importlib.util
+        import importlib
 
-        if self.name in sys.modules:
-            module = sys.modules[self.name]
-        else:
-            if self.is_package:
-                submodule_search_locations = [str(self.path)]
-            else:
-                submodule_search_locations = None
-            spec = importlib.util.spec_from_file_location(
-                name=self.name,
-                location=self.source_path,
-                submodule_search_locations=submodule_search_locations,
-            )
-            if spec is None:
-                raise ImportError(f"Cannot load module {self.name} from {self.path}")
-            module = importlib.util.module_from_spec(spec)
-            if spec.loader is None:
-                raise ImportError(f"Cannot load module {self.name} from {self.path}")
-            spec.loader.exec_module(module)
+        if self.name not in sys.modules:
+            import_root = str(self.path.parents[self.name.count(".")])
+            if import_root not in sys.path:
+                sys.path.insert(0, import_root)
+            importlib.invalidate_caches()
 
+        module = importlib.import_module(self.name)
         return Module(source_path=self.source_path, name=self.name, module=module)
 
     def iter_submodules(self, skip_private: bool = False) -> Iterator[ModuleSpec]:
