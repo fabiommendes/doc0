@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterable, Iterator
 
-from .exports import Section, parse_export_sections
+from .exports import Section, parse_export_sections, parse_reexport_sections
 
 log = getLogger(__name__)
 
@@ -162,6 +162,8 @@ class Module:
 
         sections = parse_export_sections(self.source_path, self.module)
         if sections is None:
+            sections = parse_reexport_sections(self.source_path, self.module)
+        if sections is None:
             yield f".. automodule:: {self.name}"
             yield "   :members:"
             return
@@ -227,7 +229,8 @@ def find_public_modules(roots: Iterable[ModuleSpec]) -> list[Module]:
                 continue
 
             if mod.exports is None:
-                log.warning("Module %s has no __all__ attribute", sub_module.name)
+                if parse_reexport_sections(mod.source_path, mod.module) is None:
+                    log.warning("Module %s has no __all__ attribute", sub_module.name)
             elif not mod.exports:
                 log.warning("Module %s do not export any symbols", sub_module.name)
 

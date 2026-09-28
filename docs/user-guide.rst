@@ -24,7 +24,8 @@ project you want to document:
 It requires Python 3.13 or newer -- not just to run doc-zero itself, but
 because doc-zero executes your project's code in-process to read docstrings
 and ``__all__``, so your project needs to import cleanly under the same
-interpreter.
+interpreter. doc-zero imports your modules straight from the source tree, so
+the project itself doesn't need to be installed, but its dependencies do.
 
 Once installed, it provides the ``doc-zero`` command (and its alias ``doc0``)
 into your virtual environment.
@@ -162,9 +163,10 @@ each one that:
   skipped), and
 - has a module docstring.
 
-A submodule that passes both checks but has no ``__all__``, or an empty
-one, is still documented (Sphinx's autodoc will show whatever it deems
-public), but doc-zero logs a warning during the build so you notice:
+A submodule that passes both checks but has neither ``__all__`` nor
+explicit re-exports (see below), or has an empty ``__all__``, is still
+documented (Sphinx's autodoc will show whatever it deems public), but
+doc-zero logs a warning during the build so you notice:
 
 .. code-block:: text
 
@@ -214,8 +216,24 @@ falls back to a plain, unordered listing. Nothing breaks; you just lose
 ordering and sections for that module.
 
 Notice static analysis tools like Mypy or Pylanc also expect ``__all__`` to be 
-a literal list/tuple of string constants, so they can check your module's public 
-API without executing it. 
+a literal list/tuple of string constants, so they can check your module's public
+API without executing it.
+
+Modules without ``__all__`` can still mark their public API with explicit
+re-exports, the convention type checkers also follow:
+
+.. code-block:: python
+
+   from ._core import Typer as Typer
+   from ._params import Option as Option
+
+When a module has no ``__all__`` but uses at least one ``from x import y as
+y`` re-export, doc-zero lists the re-exported names and the public classes
+and functions defined in the module itself, in source order. Plain imports
+(``from ._core import helper``) are not part of the API, and submodules
+imported this way get their own pages instead. Without ``__all__`` or
+re-exports, doc-zero falls back to autodoc's default listing, which skips
+imported names.
 
 Adding narrative documentation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

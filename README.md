@@ -72,7 +72,10 @@ following conditions:
 
 * The module is not private (i.e., it does not start with an underscore).
 * The module has a docstring.
-* The module defines a `__all__` variable that lists its public API.
+
+Each page lists the module's public API: the names in `__all__` or, for
+modules without `__all__`, explicit re-exports (`from ._core import App as App`)
+plus the public classes and functions defined in the module.
 
 `doc-zero` only includes the public API in the generated documentation. 
 

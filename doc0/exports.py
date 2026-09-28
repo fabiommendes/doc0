@@ -40,13 +40,14 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import io
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
-__all__ = ["Section", "parse_export_sections"]
+__all__ = ["Section", "parse_export_sections", "parse_reexport_sections"]
 
 _SECTION_MARKER = "#:"
 
@@ -106,6 +107,48 @@ def parse_export_sections(
         return None
 
     return _split_into_sections(source, node, names)
+
+
+def parse_reexport_sections(
+    source_path: Path, module: ModuleType
+) -> list[Section] | None:
+    """
+    List the public API of a module that has no ``__all__`` but marks it
+    with explicit re-exports: ``from x import y as y`` (the PEP 484
+    convention, used e.g. by typer).
+
+    The result is a single unlabeled section with the re-exported names and
+    the public classes and functions defined in the module, in source
+    order. Imports without a redundant ``as`` are not part of the API, and
+    submodules are left out since they get their own pages.
+
+    Returns None when the module has ``__all__`` or no explicit
+    re-exports -- callers should fall back to their default listing.
+    """
+    if getattr(module, "__all__", None) is not None:
+        return None
+    # The module was just imported from this file, so it reads and parses.
+    tree = ast.parse(source_path.read_text())
+
+    names: list[str] = []
+    has_reexports = False
+    for stmt in tree.body:
+        if isinstance(stmt, ast.ImportFrom):
+            reexported = [a.name for a in stmt.names if a.asname == a.name != "*"]
+            has_reexports = has_reexports or bool(reexported)
+            names.extend(reexported)
+        elif isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not stmt.name.startswith("_"):
+                names.append(stmt.name)
+    if not has_reexports:
+        return None
+
+    public = [
+        name
+        for name in dict.fromkeys(names)
+        if hasattr(module, name) and not inspect.ismodule(getattr(module, name))
+    ]
+    return [Section(title=None, names=public)]
 
 
 def _find_all_literal(source: str) -> ast.List | ast.Tuple | None:

@@ -1,0 +1,8 @@
+[project]
+name = "reexp"
+version = "0.1.0"
+description = "Shaped like typer: no __all__, API re-exported with `as`."
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

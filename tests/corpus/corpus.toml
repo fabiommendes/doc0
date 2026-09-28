@@ -31,6 +31,10 @@
 [local.flat-toplevel.pages]
 "api/flat_pkg.html" = ["flat_pkg.VERSION", "flat_pkg.greet"]
 
+[local.reexports.pages]
+"api/reexp.html" = ["reexp.App", "reexp.run", "reexp.get_terminal_size", "reexp.main"]
+"api/reexp.colors.html" = ["reexp.colors.GREEN"]
+
 [external.attrs]
 git = "https://github.com/python-attrs/attrs"
 ref = "26.1.0"
@@ -40,3 +44,10 @@ ref = "26.1.0"
 "api/attrs.html" = ["attrs.asdict", "attrs.Attribute", "attrs.Converter"]
 "api/attr.validators.html" = ["attr.validators.instance_of", "attr.validators.optional"]
 "api/attr.converters.html" = ["attr.converters.optional", "attr.converters.pipe"]
+
+[external.typer]
+git = "https://github.com/fastapi/typer"
+ref = "0.27.2"
+
+[external.typer.pages]
+"api/typer.html" = ["typer.Typer", "typer.Option", "typer.Argument", "typer.echo"]

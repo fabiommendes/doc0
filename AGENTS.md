@@ -65,6 +65,9 @@ and PR. A change is not done until both pass locally.
   can be done reliably (see the module docstring for the exact rules and a
   documented edge-case limitation). Falls back to `None` for anything
   dynamic, computed, or that doesn't match the module's runtime `__all__`.
+  For modules without `__all__`, `parse_reexport_sections` lists explicit
+  re-exports (`from x import y as y`) plus public defs/classes in source
+  order (used by typer-style packages); `None` if there are no re-exports.
 - `doc0/theme.py` -- internal: `resolve_theme(cli_theme, pyproject)` is the
   one place the Sphinx theme is decided: precedence (`--theme` >
   `[tool.doc-zero] theme` > `"default"`), then validation, then alias

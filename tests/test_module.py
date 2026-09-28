@@ -280,6 +280,9 @@ def test_find_public_modules_warns_about_missing_or_empty_all(tmp_path, caplog):
     make_module_file(pkg / "api.py", docstring="Public API.", all_=["thing"])
     make_module_file(pkg / "legacy.py", docstring="No __all__ here.")
     make_module_file(pkg / "empty.py", docstring="Exports nothing.", all_=[])
+    # No __all__, but explicit re-exports define its API: no warning.
+    make_module_file(pkg / "_impl.py", body="def run():\n    pass\n")
+    make_module_file(pkg / "cli.py", docstring="CLI.", body="from ._impl import run as run\n")
 
     with caplog.at_level("WARNING"):
         find_public_modules([ModuleSpec(name="pm_w", path=pkg)])
@@ -393,4 +396,45 @@ def test_module_render_lists_all_entries_explicitly_in_order(tmp_path):
         "   :member-order: bysource",
         "",
         ".. autofunction:: widgets.make_widget",
+    ]
+
+
+def test_module_render_lists_explicit_reexports_when_there_is_no_all(tmp_path):
+    """Packages like typer have no __all__ and expose their API with
+    ``from x import y as y`` re-exports, which autodoc's ``:members:``
+    skips. Those, plus public classes and functions defined in the module,
+    are listed explicitly in source order."""
+    pkg = make_package(tmp_path / "reexp", body=(
+        "import os\n"
+        "from shutil import get_terminal_size as get_terminal_size\n"
+        "from . import colors as colors\n"
+        "from ._impl import App as App\n"
+        "from ._impl import helper\n"
+        "\n"
+        "def main():\n"
+        "    '''Entry point.'''\n"
+        "\n"
+        "def _private():\n"
+        "    pass\n"
+    ))
+    make_module_file(pkg / "colors.py", docstring="Colors.")
+    make_module_file(
+        pkg / "_impl.py",
+        body="class App:\n    '''An app.'''\n\ndef helper():\n    pass\n",
+    )
+    module = ModuleSpec(name="reexp", path=pkg).load_module()
+
+    assert module.render().splitlines() == [
+        "reexp",
+        "=====",
+        "",
+        ".. automodule:: reexp",
+        "",
+        ".. autofunction:: reexp.get_terminal_size",
+        "",
+        ".. autoclass:: reexp.App",
+        "   :members:",
+        "   :member-order: bysource",
+        "",
+        ".. autofunction:: reexp.main",
     ]
