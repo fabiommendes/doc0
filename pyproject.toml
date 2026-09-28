@@ -1,6 +1,6 @@
 [project]
 name = "doc-zero"
-version = "0.2.2"
+version = "0.2.3"
 description = "Zero-configuration documentation generator for Python."
 readme = "README.md"
 authors = [
